@@ -60,7 +60,19 @@ Planned walkthrough: enter a topic → auto-generated study plan → Socratic Q&
 └── requirements.txt
 ```
 
-## 🚀 Quick Start (Development)
+## 🚀 Quick Start
+
+### Option 1: Download the Installer (Recommended)
+
+1. **Download**: [SiXiaoJie-Setup-1.0.0.exe](https://github.com/qinjin1021/Socratis/releases/download/v1.0.0/SiXiaoJie-Setup-1.0.0.exe) (~231 MB)
+   Or browse all versions on the [Releases page](https://github.com/qinjin1021/Socratis/releases/latest)
+2. **Install**: double-click and follow the wizard (no admin rights required)
+3. **Configure**: on first launch, enter your own LLM API key (recommended: [DeepSeek](https://platform.deepseek.com) — register and create a key under "API Keys"; Qwen / Kimi / Zhipu / local Ollama and other OpenAI-compatible services also work)
+4. **Start learning**: type any topic you want to learn, and the companion will build a study plan and start teaching with Socratic questions 🎉
+
+> 💡 The installer bundles the local embedding model, so vector search works offline after installation; LLM chat and online voices require internet. All learning data is stored locally in `%APPDATA%\SiXiaoJie\`.
+
+### Option 2: Run from Source (Developers)
 
 Requirements: Windows 10+ · Python 3.10+
 

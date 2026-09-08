@@ -59,7 +59,19 @@
 └── requirements.txt
 ```
 
-## 🚀 快速开始（开发模式）
+## 🚀 快速开始
+
+### 方式一：下载安装包（推荐）
+
+1. **下载安装包**：[SiXiaoJie-Setup-1.0.0.exe](https://github.com/qinjin1021/Socratis/releases/download/v1.0.0/SiXiaoJie-Setup-1.0.0.exe)（约 231 MB）
+   也可前往 [Releases 页面](https://github.com/qinjin1021/Socratis/releases/latest) 查看全部版本
+2. **安装**：双击运行，按向导下一步即可（无需管理员权限）
+3. **配置**：首次启动会弹出向导，输入你自己的大模型 API Key（推荐 [DeepSeek](https://platform.deepseek.com)：注册后在「API Keys」创建；也支持通义千问 / Kimi / 智谱 / 本地 Ollama 等 OpenAI 兼容服务）
+4. **开始学习**：输入想学的主题，思小诘会制定计划并开始苏格拉底式提问教学 🎉
+
+> 💡 安装包已内置本地 embedding 模型，安装后向量检索离线可用；大模型对话与在线语音需联网。学习数据保存在本机 `%APPDATA%\SiXiaoJie\`。
+
+### 方式二：源码运行（开发者）
 
 环境要求：Windows 10+ · Python 3.10+
 
