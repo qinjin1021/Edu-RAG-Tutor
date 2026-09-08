@@ -4,6 +4,20 @@ English | [简体中文](./README.md)
 
 A Windows desktop AI study buddy. Instead of handing you answers, she guides you to think for yourself the Socratic way — building a study plan, teaching point by point with questions, tracking mastery, filling gaps, and wrapping up with a learning summary.
 
+## 🎬 Demo Video
+
+<!-- To add the demo video (choose one, then replace this block):
+① Recommended: edit README_EN.md on github.com and drag your .mp4 file directly
+   into the editor — GitHub uploads it and generates an inline-playable link;
+② External link: upload to YouTube / Bilibili and embed with
+   [![thumbnail](thumbnail-url)](video-url) format.
+   (Keep the video under ~100MB; on Windows use Win+G Game Bar to record.)
+-->
+
+📹 Demo video coming soon~
+
+Planned walkthrough: enter a topic → auto-generated study plan → Socratic Q&A teaching → stage reward & consolidation quiz → voice interaction → learning summary.
+
 ## ✨ Features
 
 - **🧭 Socratic Teaching Engine** — a state machine drives the full learning flow: `Planning → Learning → Consolidation → Review → Summary`, evaluating each of your answers and adjusting mastery dynamically
