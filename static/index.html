@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>思小诘 · 苏格拉底学习助手</title>
+  <link rel="stylesheet" href="css/style.css?v=7" />
+</head>
+<body>
+<div id="app">
+
+  <!-- 左栏：思小诘舞台 -->
+  <aside class="stage-panel card">
+    <div class="stage">
+      <div class="stage-deco d1"></div>
+      <div class="stage-deco d2"></div>
+      <div class="stage-deco d3"></div>
+      <div class="char-float">
+        <img id="character-img" src="assets/character/default/idle.png" alt="思小诘立绘" draggable="false" title="点我一下试试～" />
+      </div>
+      <div id="char-bubble" class="char-bubble"></div>
+    </div>
+    <div class="stage-info">
+      <div class="stage-name">思小诘</div>
+      <div class="stage-sub">你的苏格拉底学习伙伴</div>
+    </div>
+    <div class="stage-controls">
+      <button id="voice-btn" class="voice-btn" title="语音开关">🔊</button>
+      <span id="phase-label" class="phase-label">未开始</span>
+    </div>
+  </aside>
+
+  <!-- 中栏：聊天区 -->
+  <main class="chat-panel card">
+    <header class="chat-header">
+      <div class="topic">
+        <span class="topic-icon">📚</span>
+        <span id="topic-text">开始你的学习吧</span>
+      </div>
+      <div class="header-btns">
+        <button id="focus-btn" class="icon-btn" title="专注模式：隐藏左侧形象，专注学习">🎯</button>
+        <button id="settings-btn" class="icon-btn" title="模型设置">⚙️</button>
+        <button id="history-btn" class="icon-btn" title="历史学习：查看学习进度">🕘</button>
+      </div>
+    </header>
+    <div id="message-list" class="message-list"></div>
+    <footer class="chat-input-bar">
+      <button id="upload-btn" class="icon-btn" title="上传学习资料">📎</button>
+      <textarea id="chat-input" rows="1" placeholder="和思小诘聊聊你想学什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="send-btn" class="send-btn">发送</button>
+    </footer>
+  </main>
+
+  <!-- 右栏：功能面板 -->
+  <aside class="side-panel">
+    <!-- ① 学习进度 -->
+    <section class="panel card">
+      <h3 class="panel-title">🌱 学习进度</h3>
+      <div id="progress-hint" class="panel-hint">发送学习主题后，思小诘会为你制定计划 ✨</div>
+      <div id="progress-body" class="hidden">
+        <div class="total-progress">
+          <div class="total-bar"><i id="total-fill"></i></div>
+          <span id="total-text" class="total-text">0%</span>
+        </div>
+        <div id="point-list" class="point-list"></div>
+      </div>
+    </section>
+
+    <!-- ② 学习资料 -->
+    <section class="panel card">
+      <h3 class="panel-title">📎 学习资料</h3>
+      <label class="upload-label" for="material-input">＋ 上传资料（.txt .md .pdf .docx）</label>
+      <input type="file" id="material-input" class="hidden" accept=".txt,.md,.pdf,.docx" />
+      <div id="material-list" class="material-list"></div>
+    </section>
+  </aside>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+
+<!-- 设置弹窗 / 首启向导（共用 DOM，wizard 模式增加引导文案） -->
+<div id="settings-modal" class="modal-mask hidden">
+  <div class="modal card">
+    <h3 id="settings-title" class="modal-title">⚙️ 模型设置</h3>
+
+    <div id="wizard-intro" class="wizard-intro hidden">
+      <div class="wizard-emoji">👋</div>
+      <p>欢迎使用思小诘！我是你的苏格拉底式学习伙伴。开始学习前，请先配置大模型 API（思小诘的"大脑"）：</p>
+      <ul>
+        <li>推荐 <b>DeepSeek</b>：到 <b>platform.deepseek.com</b> 注册，在「API Keys」页面创建一个 Key</li>
+        <li>也支持其他 OpenAI 兼容服务（通义千问 / Kimi / 智谱 / 本地 Ollama…），填写对应的接口地址和模型名即可</li>
+      </ul>
+    </div>
+
+    <div class="form-row">
+      <label for="set-api-key">API Key
+        <span id="key-status" class="key-status"></span>
+        <button id="clear-key-btn" class="link-btn hidden" type="button">清除已保存的 Key</button>
+      </label>
+      <div class="key-row">
+        <input type="password" id="set-api-key" placeholder="sk-…（已配置时可留空保持不变）" autocomplete="off" />
+        <button id="toggle-key-btn" class="mini-btn" type="button">显示</button>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <label for="set-base-url">接口地址（Base URL）</label>
+      <input type="text" id="set-base-url" placeholder="https://api.deepseek.com" autocomplete="off" />
+    </div>
+
+    <div class="form-row">
+      <label for="set-model">模型名称</label>
+      <input type="text" id="set-model" placeholder="deepseek-chat" autocomplete="off" />
+    </div>
+
+    <div class="form-row">
+      <label for="set-skin">形象皮肤</label>
+      <select id="set-skin"></select>
+    </div>
+
+    <div class="form-row">
+      <label for="set-voice">语音音色
+        <button id="preview-voice-btn" class="link-btn" type="button">▶ 试听</button>
+      </label>
+      <select id="set-voice"></select>
+    </div>
+
+    <div id="test-result" class="test-result hidden"></div>
+
+    <div class="modal-actions">
+      <button id="test-conn-btn" class="mini-btn" type="button">🔌 测试连接</button>
+      <span class="sp"></span>
+      <button id="settings-cancel" class="mini-btn hidden" type="button">取消</button>
+      <button id="settings-save" class="primary-btn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 历史学习弹窗：会话列表 + 进度，点击会话恢复学习 -->
+<div id="history-modal" class="modal-mask hidden">
+  <div class="modal card history-modal">
+    <div class="history-head">
+      <h3 class="modal-title">🕘 历史学习</h3>
+      <button id="new-session-btn" class="mini-btn">＋ 新的学习</button>
+    </div>
+    <div id="session-list" class="session-list"></div>
+    <div class="modal-actions">
+      <span class="sp"></span>
+      <button id="history-close" class="mini-btn" type="button">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js?v=6"></script>
+</body>
+</html>

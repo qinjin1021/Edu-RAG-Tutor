@@ -1,0 +1,16 @@
+.venv/
+data/
+__pycache__/
+.env
+build/
+dist/
+installer/
+models/
+
+# 开发期一次性调试脚本（不入库）
+_*.py
+probe.spec
+_probe_*/
+
+# 个人文档（不入库）
+项目面试准备.txt
