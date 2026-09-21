@@ -13,8 +13,22 @@ from PyInstaller.utils.hooks import (
     collect_submodules,
 )
 
-datas = [
-    ("static", "static"),   # 前端页面/JS/CSS/立绘
+import os
+
+def collect_static():
+    """收集 static/ 全部文件，但跳过学伴离线语音模型 voice/ 目录
+    （单模型 >100MB，安装包体积会从 ~240MB 涨到 ~790MB；
+    需要离线语音包的用户按 语音包说明.txt 自行下载放入）。"""
+    out = []
+    for root, dirs, files in os.walk("static"):
+        dirs[:] = [d for d in dirs if d != "voice"]
+        for f in files:
+            src = os.path.join(root, f)
+            out.append((src, os.path.dirname(src)))
+    return out
+
+datas = collect_static()
+datas += [
     ("models", "models"),   # 内置 bge-small-zh-v1.5 Embedding 模型（离线可用）
 ]
 
