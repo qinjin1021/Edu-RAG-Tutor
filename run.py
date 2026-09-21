@@ -6,7 +6,7 @@
 
 打包（窗口）模式下 sys.stdout/stderr 为 None：任何 print / 日志写入都会抛异常，
 uvicorn 日志配置也会因 isatty() 崩溃。此处统一重定向到用户目录日志文件
-（%APPDATA%\\SiXiaoJie\\sixiaojie.log）；失败则退回 devnull，绝不让流为 None。
+（%APPDATA%\\EduRAGTutor\\eduragtutor.log）；失败则退回 devnull，绝不让流为 None。
 """
 
 import sys
@@ -15,12 +15,12 @@ if getattr(sys, "frozen", False):
     import os
     from pathlib import Path
 
-    _base = Path(os.environ.get("APPDATA") or Path.home()) / "SiXiaoJie"
+    _base = Path(os.environ.get("APPDATA") or Path.home()) / "EduRAGTutor"
     _diag = []
     try:
         _base.mkdir(parents=True, exist_ok=True)
-        _stream = open(_base / "sixiaojie.log", "a", encoding="utf-8", buffering=1)
-        _diag.append(f"stdout redirect OK -> {_base / 'sixiaojie.log'}")
+        _stream = open(_base / "eduragtutor.log", "a", encoding="utf-8", buffering=1)
+        _diag.append(f"stdout redirect OK -> {_base / 'eduragtutor.log'}")
     except BaseException as e:  # noqa: BLE001 —— 诊断目的，任何异常都兜住
         _diag.append(f"stdout redirect FAIL ({type(e).__name__}: {e!r}), fallback devnull")
         _stream = open(os.devnull, "a", encoding="utf-8")

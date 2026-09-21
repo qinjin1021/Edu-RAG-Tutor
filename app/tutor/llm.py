@@ -132,8 +132,12 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
-def chat_json(messages, temperature=None, max_tokens=None) -> Optional[dict]:
-    """请求 JSON 输出并解析为 dict；解析失败时剥掉围栏重试，仍失败返回 None。"""
+def chat_json_with_raw(messages, temperature=None, max_tokens=None) -> tuple[Optional[dict], str]:
+    """请求 JSON 输出，返回 (解析结果或 None, 原始文本)。
+
+    解析失败时剥掉围栏重试；仍失败返回 (None, 原文)——调用方可对原文做
+    截断救捞（如推理模型 max_tokens 不足导致 JSON 写到一半被截断）。
+    """
     resp = _get_client().chat.completions.create(
         messages=messages,
         response_format={"type": "json_object"},
@@ -141,12 +145,17 @@ def chat_json(messages, temperature=None, max_tokens=None) -> Optional[dict]:
     )
     content = resp.choices[0].message.content or ""
     try:
-        return json.loads(content)
+        return json.loads(content), content
     except json.JSONDecodeError:
         pass
     try:
         # 二次尝试：剥掉可能的 markdown 围栏
-        return json.loads(_strip_fences(content))
+        return json.loads(_strip_fences(content)), content
     except json.JSONDecodeError:
         logger.warning("LLM 返回内容无法解析为 JSON: %s", content[:200])
-        return None
+        return None, content
+
+
+def chat_json(messages, temperature=None, max_tokens=None) -> Optional[dict]:
+    """请求 JSON 输出并解析为 dict；失败返回 None。"""
+    return chat_json_with_raw(messages, temperature, max_tokens)[0]

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     topic TEXT DEFAULT '',
     status TEXT NOT NULL DEFAULT 'planning',
+    method TEXT NOT NULL DEFAULT 'socratic',
     replan_pending INTEGER DEFAULT 0,
     created_at TEXT,
     updated_at TEXT
@@ -47,6 +48,18 @@ CREATE TABLE IF NOT EXISTS prefs (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS assessments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    topic TEXT DEFAULT '',
+    questions TEXT DEFAULT '[]',
+    answers TEXT DEFAULT '[]',
+    score INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    level TEXT DEFAULT '',
+    route TEXT DEFAULT '[]',
+    created_at TEXT
+);
 """
 
 
@@ -63,11 +76,21 @@ def now_str() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """旧库迁移：sessions 表补 method 列（幂等，带默认值回填）。"""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "method" not in cols:
+        conn.execute(
+            "ALTER TABLE sessions ADD COLUMN method TEXT NOT NULL DEFAULT 'socratic'"
+        )
+
+
 def init_db() -> None:
-    """初始化数据库：建表（幂等，可重复调用）。"""
+    """初始化数据库：建表 + 迁移（均幂等，可重复调用）。"""
     conn = get_conn()
     try:
         conn.executescript(_SCHEMA)
+        _migrate(conn)
         conn.commit()
     finally:
         conn.close()

@@ -1,4 +1,4 @@
-/* ===== 思小诘 · 苏格拉底学习助手 —— 粉蓝 pastel 主题 ===== */
+/* ===== Edu-RAG-Tutor —— 粉蓝 pastel 主题 ===== */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
@@ -482,6 +482,30 @@ body {
 .history-head .modal-title { margin-bottom: 0; }
 .history-modal .session-list { flex: 0 1 auto; max-height: 56vh; margin: 14px 0; }
 
+/* 学习方法选择弹窗 */
+.method-modal { width: 560px; }
+.method-tip { font-size: 12px; color: var(--ink-light); margin: 10px 0 4px; line-height: 1.6; }
+.method-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; max-height: 60vh; overflow-y: auto; }
+.method-grid.locked { pointer-events: none; opacity: 0.6; }
+.method-card {
+  display: flex; gap: 10px; align-items: center; padding: 12px;
+  background: #fff; border: 1px solid #edf0f8; border-radius: 14px;
+  cursor: pointer; transition: all 0.18s ease;
+}
+.method-card:hover { border-color: var(--pink); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(255, 143, 174, 0.18); }
+.m-avatar {
+  width: 54px; height: 54px; border-radius: 50%; object-fit: cover;
+  object-position: top center; flex-shrink: 0; background: var(--pink-light);
+}
+.m-body { min-width: 0; }
+.m-title { font-size: 13.5px; font-weight: 700; color: var(--ink); }
+.m-char { font-size: 11.5px; color: var(--blue-deep); font-weight: 600; margin: 2px 0; }
+.m-intro { font-size: 11.5px; color: var(--ink-light); line-height: 1.5; }
+.m-asset-tag {
+  font-size: 10px; color: var(--ink-light); background: #f3f4fa;
+  border-radius: 999px; padding: 1px 6px; margin-left: 4px; white-space: nowrap;
+}
+
 .wizard-intro { background: var(--blue-light); border-radius: 14px; padding: 14px 16px; margin-bottom: 16px; }
 .wizard-intro .wizard-emoji { font-size: 34px; text-align: center; }
 .wizard-intro p { font-size: 13px; line-height: 1.7; margin: 8px 0; }
@@ -535,3 +559,127 @@ body {
   font-family: inherit;
 }
 .link-btn:hover { color: #e86a90; }
+
+/* ===== 联网找资料弹窗 ===== */
+.material-head { display: flex; align-items: center; gap: 8px; }
+.material-head .upload-label { flex: 1; }
+.material-head .mini-btn { flex-shrink: 0; }
+
+.search-modal { width: 640px; max-width: 94vw; }
+.search-bar { display: flex; gap: 8px; margin: 10px 0; }
+.search-bar input {
+  flex: 1;
+  border: 1.5px solid #e3e8f5;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.search-bar input:focus { border-color: var(--pink); }
+
+.type-chips { display: flex; gap: 6px; margin-bottom: 10px; }
+.chip {
+  border: 1.5px solid #e3e8f5;
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--ink-light);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.chip:hover { border-color: var(--pink); color: var(--pink-deep); }
+.chip.active { background: var(--pink); border-color: var(--pink); color: #fff; font-weight: 600; }
+
+.search-results {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 46vh; overflow-y: auto;
+  min-height: 60px;
+}
+.search-result {
+  background: #fff;
+  border: 1px solid #edf0f8;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.sr-head { display: flex; align-items: baseline; gap: 8px; }
+.sr-title {
+  flex: 1;
+  color: var(--blue-deep);
+  font-size: 13.5px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sr-title:hover { color: var(--pink-deep); text-decoration: underline; }
+.sr-host { flex-shrink: 0; font-size: 11px; color: var(--ink-light); }
+.sr-snip { font-size: 12px; color: var(--ink-light); line-height: 1.5; margin: 4px 0 8px; }
+.sr-actions { display: flex; gap: 8px; }
+.search-empty { text-align: center; color: var(--ink-light); font-size: 13px; padding: 24px 0; }
+
+/* ===== 方法卡试听按钮（学伴固定音色） ===== */
+.m-voice { align-self: center; flex-shrink: 0; font-size: 12px; padding: 4px 10px; }
+.m-voice:disabled { opacity: 0.6; cursor: wait; }
+
+/* ===== 学前测评 ===== */
+.assess-modal { width: 560px; }
+/* 方法弹窗首位的测评入口卡：虚线框渐变底，与方法卡区分 */
+.assess-card { border: 1.5px dashed var(--blue); background: linear-gradient(135deg, #f2f8ff, #fdf3f7); }
+.assess-card:hover { border-color: var(--blue-deep); }
+.assess-avatar {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; background: linear-gradient(135deg, var(--blue-light), var(--pink-light));
+}
+/* 答题区 */
+.quiz-list { display: flex; flex-direction: column; gap: 12px; margin: 12px 0; max-height: 52vh; overflow-y: auto; }
+.quiz-item { background: #fff; border: 1px solid #edf0f8; border-radius: 14px; padding: 12px 14px; }
+.quiz-q {
+  display: flex; gap: 6px; align-items: flex-start;
+  font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.6;
+}
+.quiz-tag {
+  flex-shrink: 0; font-size: 10.5px; font-weight: 600; margin-top: 2px;
+  border-radius: 999px; padding: 1px 7px; background: var(--blue-light); color: var(--blue-deep);
+}
+.quiz-opts { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.quiz-opt {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-size: 13px; color: var(--ink-light); line-height: 1.55;
+  padding: 6px 8px; border-radius: 10px; cursor: pointer; transition: background 0.15s;
+}
+.quiz-opt:hover { background: var(--blue-light); }
+/* 覆盖 .modal input{width:100%}，单选框只占自身大小，否则圆圈撑满整行把文字挤到右侧 */
+.quiz-opt input {
+  width: auto;
+  flex-shrink: 0;
+  margin-top: 3px;
+  accent-color: var(--pink-deep);
+}
+/* 结果区 */
+.assess-head { font-size: 15px; font-weight: 700; color: var(--ink); margin: 6px 0; }
+.assess-summary { font-size: 13px; color: var(--ink-light); line-height: 1.7; margin: 6px 0 12px; }
+.assess-review { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.review-item { border-radius: 10px; padding: 8px 10px; font-size: 12.5px; line-height: 1.6; }
+.review-item.ok { background: #f2faf5; }
+.review-item.bad { background: #fdf5f5; }
+.review-q { color: var(--ink); font-weight: 500; }
+.review-a { color: var(--ink-light); margin-top: 3px; }
+/* 路线阶段卡 */
+.route-phase {
+  background: #fff; border: 1px solid #edf0f8; border-radius: 14px;
+  padding: 12px 14px; margin-bottom: 10px;
+  box-shadow: 0 2px 6px rgba(151, 167, 215, 0.08);
+}
+.route-title { font-size: 13.5px; font-weight: 700; color: var(--blue-deep); }
+.route-goal { font-size: 12.5px; color: var(--ink); line-height: 1.65; margin-top: 4px; }
+.route-points { font-size: 12px; color: var(--ink-light); margin-top: 4px; }
+.route-milestone { font-size: 12px; color: #d98a2b; margin-top: 4px; }
+.route-phase .primary-btn, .route-phase .mini-btn { margin-top: 10px; }
+/* 聊天区测评建议卡 */
+.assess-suggest { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.suggest-text { font-size: 13px; line-height: 1.7; }
+.suggest-actions { display: flex; gap: 8px; }

@@ -1,13 +1,13 @@
-; Inno Setup 安装包脚本：思小诘 · 苏格拉底学习助手
-; 编译前先执行 PyInstaller 构建（dist\SiXiaoJie\ 为打包产物）
+; Inno Setup 安装包脚本：Edu-RAG-Tutor
+; 编译前先执行 PyInstaller 构建（dist\EduRAGTutor\ 为打包产物）
 ; 编译：ISCC.exe installer.iss
 
-#define MyAppName "思小诘学习助手"
-#define MyAppNameEn "SiXiaoJie"
-#define MyAppVersion "1.0.0"
-#define MyAppPublisher "思小诘 SiXiaoJie"
-#define MyAppExeName "SiXiaoJie.exe"
-#define MyAppDescription "苏格拉底式 AI 学习伙伴"
+#define MyAppName "Edu-RAG-Tutor"
+#define MyAppNameEn "EduRAGTutor"
+#define MyAppVersion "1.1.0"
+#define MyAppPublisher "Edu-RAG-Tutor"
+#define MyAppExeName "EduRAGTutor.exe"
+#define MyAppDescription "AI 学习伙伴 · 六种学习方法"
 
 [Setup]
 AppId={{B6F4A9C2-8E3D-4F7A-9B5E-1C2D3E4F5A6B}
@@ -23,8 +23,8 @@ UninstallDisplayIcon={app}\{#MyAppExeName}
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=installer
-OutputBaseFilename=SiXiaoJie-Setup-{#MyAppVersion}
-SetupIconFile=
+OutputBaseFilename=EduRAGTutor-Setup-{#MyAppVersion}
+SetupIconFile=app.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -47,7 +47,7 @@ AdditionalTasks=附加任务:
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalTasks}"; Flags: checkedonce
 
 [Files]
-Source: "dist\SiXiaoJie\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
+Source: "dist\EduRAGTutor\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -58,5 +58,5 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; 卸载时清理空的安装目录（用户数据在 %APPDATA%\SiXiaoJie，不随卸载删除）
+; 卸载时清理空的安装目录（用户数据在 %APPDATA%\EduRAGTutor，不随卸载删除）
 Type: filesandordirs; Name: "{app}"

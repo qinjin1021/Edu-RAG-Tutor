@@ -1,0 +1,92 @@
+════════════════════════════════════════════════════════════════
+  语音包说明 —— 自定义学伴音色与离线语音包
+════════════════════════════════════════════════════════════════
+
+【放置位置】
+把一个名为 voice.txt 的文本文件放进对应学伴的形象目录：
+
+  static/assets/character/default/voice.txt    → 思小诘（苏格拉底问答法）
+  static/assets/character/feynman/voice.txt    → 费小曼（费曼学习法）
+  static/assets/character/gewu/voice.txt       → 格小致（格物致知）
+  static/assets/character/spaced/voice.txt     → 温小习（间隔复习法）
+  static/assets/character/sq3r/voice.txt       → 阅小思（SQ3R 阅读法）
+  static/assets/character/retrieval/voice.txt  → 检小索（检索练习法）
+
+【文件格式】
+文件里只写一行音色 ID，例如：
+
+  zh-CN-yunxiaNeural
+
+保存后重新打开"新的学习"弹窗即生效（无需重启程序）；
+删除 voice.txt 即恢复该学伴的默认音色。
+
+【六位学伴的默认音色】
+  思小诘  zh-CN-xiaoyiNeural     晓伊 · 活泼少女
+  费小曼  zh-CN-xiaoyiNeural     晓伊 · 活泼少女
+  格小致  zh-CN-yunjianNeural    云健 · 磁性男声
+  温小习  zh-CN-yunyangNeural    云扬 · 专业男声
+  阅小思  zh-CN-xiaoxiaoNeural   晓晓 · 温暖亲切
+  检小索  zh-CN-xiaoxiaoNeural   晓晓 · 温暖亲切
+
+【其他可用音色（edge-tts 在线音色，需联网）】
+  zh-CN-xiaoxiaoNeural   晓晓 · 温暖亲切
+  zh-CN-xiaoyiNeural     晓伊 · 活泼少女
+  zh-CN-yunxiNeural      云希 · 阳光少年
+  zh-CN-yunyangNeural    云扬 · 新闻播音
+  zh-CN-yunjianNeural    云健 · 磁性男声
+  zh-CN-yunxiaNeural     云夏 · 少年可爱
+  zh-CN-liaoning-XiaobeiNeural   小北 · 东北口音女声
+  zh-CN-shaanxi-XiaoniNeural     小妮 · 陕西口音女声
+  zh-HK-HiuGaaiNeural            香港女声（粤语）
+  zh-HK-HiuMaanNeural            香港女声（粤语）
+  zh-HK-WanLungNeural            香港男声（粤语）
+  zh-TW-HsiaoChenNeural          台湾女声（温柔）
+  zh-TW-HsiaoYuNeural            台湾女声
+  zh-TW-YunJheNeural             台湾男声
+
+【查看全部音色】
+微软会不定期上架/下架音色，以实时列表为准：
+  .venv\Scripts\python.exe -m edge_tts --list-voices
+注意：晓辰(xiaochen)、晓墨(xiaomo) 已被微软下架，写了会合成失败。
+
+【容错说明】
+音色 ID 写错或文件为空时，自动回退该学伴的默认音色；
+离线场景会降级为系统本地语音（无法区分音色，属正常现象）。
+方法选择卡片上每个学伴都有"🔊 试听"按钮，可以先听后选。
+
+────────────────────────────────────────────────────────────────
+
+【离线语音包（进阶）—— 完全离线、不吃联网音色】
+
+想让某个学伴在断网时也用自己的专属声音？给它放一个离线语音包。
+
+【学伴目录对照】
+  static/assets/character/default/    → 思小诘
+  static/assets/character/feynman/    → 费小曼
+  static/assets/character/gewu/       → 格小致
+  static/assets/character/spaced/     → 温小习
+  static/assets/character/sq3r/       → 阅小思
+  static/assets/character/retrieval/  → 检小索
+
+【模型下载】
+sherpa-onnx 官方 TTS 模型发布页（免费、可离线）：
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models
+中文示例（拼音女声，约 130MB）：
+  vits-piper-zh_CN-huayan-medium.tar.bz2
+同页面还有其他中文 vits 模型（huayan/meilin/icefall-aishell3 等，
+多说话人模型默认取第 1 个音色）。
+
+【放置方法】
+1. 在学伴目录下新建 voice 子目录，例如：
+     static/assets/character/spaced/voice/
+2. 把下载的压缩包解压后里面的全部文件都放进去，典型包括：
+     *.onnx（模型本体，必需）
+     tokens.txt（必需）
+     espeak-ng-data/ 文件夹（piper 格式才有）
+     lexicon.txt / dict/ 文件夹（词典格式才有）
+3. 放下即用，无需重启程序；删除 voice 目录即恢复在线音色。
+
+【优先级说明】
+edge-tts 在线音色（音质最佳，需联网）→ 系统本机语音 → 学伴离线语音包（最后兜底）：
+只有断网且系统语音也不可用时才会用到离线包；
+包损坏或未安装 sherpa-onnx 时跳过离线包，朗读不受影响。

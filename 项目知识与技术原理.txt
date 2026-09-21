@@ -1,0 +1,264 @@
+════════════════════════════════════════════════════════════════════
+  Edu-RAG-Tutor —— 项目知识与技术原理总览
+════════════════════════════════════════════════════════════════════
+整理日期：2026-09-16
+项目定位：桌面端 AI 一对一学习伙伴。内置 6 种学习方法（苏格拉底提问、
+费曼学习、格物致知、间隔复习、SQ3R 阅读、检索练习），每种方法对应
+一位 AI 学习伙伴（思小诘/费小曼/格小致/温小习/阅小思/检小索）与专属
+人物立绘，围绕学习计划逐点教学、评估掌握度、直至完成学习。
+
+本文按板块梳理项目覆盖的所有框架、底层算法与知识原理。
+
+──────────────────────────────────────────────────────────────────
+一、总体架构
+──────────────────────────────────────────────────────────────────
+技术栈：Python 3 + FastAPI + SQLite + ChromaDB + sentence-transformers
+        + pywebview 桌面窗口 + 原生 JS 前端（无任何前端框架）。
+
+分层结构：
+  ┌─ 桌面壳   pywebview 打开本地服务页面（EdgeChromium 内核）
+  ├─ 前端     static/ 原生 HTML/CSS/JS
+  ├─ API 层   app/api/  FastAPI 路由（会话/聊天/资料/设置/杂项）
+  ├─ 教学层   app/tutor/ 状态机 + 提示词组装 + 学习方法注册表
+  ├─ 知识库   app/kb/   文件解析→分块→向量化→检索（RAG）
+  ├─ 存储层   app/db/   SQLite（业务数据）+ ChromaDB（向量）
+  └─ 配置层   app/config.py  pydantic-settings + 热配置
+
+核心数据流（一次提问）：
+  用户输入 → 前端 fetch POST → FastAPI 路由 → socratic.handle_chat
+  → 状态机判定阶段 → RAG 检索学习资料 → 组装提示词 → LLM 流式补全
+  → 剥离评估块 <<<EVAL>>> 更新掌握度/状态 → SSE 逐字推回前端渲染
+  → 语音队列 TTS 播报。
+
+──────────────────────────────────────────────────────────────────
+二、后端框架与协议
+──────────────────────────────────────────────────────────────────
+1. FastAPI（Web 框架）
+   - 基于 ASGI 的异步框架，路由装饰器 @router.get/post 注册端点。
+   - lifespan 生命周期钩子：启动时 init_db() 建库/迁移，退出清理。
+   - StreamingResponse 流式响应：以 generator 逐段 yield 文本，
+     media_type="text/event-stream" 实现 SSE 推流。
+   - Pydantic BaseModel 请求体校验：SessionBody/SettingsBody 等；
+     `body: SessionBody | None = None` 允许无 body 请求（兼容旧前端）。
+   - APIRouter 分模块挂载：routes_session / routes_chat /
+     routes_material / routes_settings / routes_misc。
+
+2. Uvicorn（ASGI 服务器）
+   - `use_colors=False`：窗口模式（pywebview）下 stdout 非 TTY，
+     彩色 ANSI 码会触发崩溃，必须关闭。
+
+3. SSE（Server-Sent Events）协议
+   - 服务端单向推送：text/event-stream，消息以空行（\n\n）分帧。
+   - 本项目自定义轻量帧格式，前后端约定按 \n\n 切分事件。
+
+4. HTTP 客户端约定
+   - 前端原生 fetch 发起请求；流式读取用 response.body
+     .getReader()（ReadableStream API）逐块解码 UTF-8。
+
+──────────────────────────────────────────────────────────────────
+三、数据存储
+──────────────────────────────────────────────────────────────────
+1. SQLite（关系型业务库）
+   - WAL（Write-Ahead Logging）模式：读写不互斥，提升并发安全。
+   - 幂等建表：CREATE TABLE IF NOT EXISTS 汇总为 _SCHEMA 常量。
+   - 列迁移算法：PRAGMA table_info(表名) 读取现有列集合 →
+     缺列才 ALTER TABLE ADD COLUMN（保证重复启动不报错）。
+     例：sessions 表新增 method 列 DEFAULT 'socratic'。
+   - prefs 键值表（KV）：存放 API Key、BaseURL、模型名等配置，
+     实现"配置即数据"，无需改文件即可热更新。
+
+2. ChromaDB（向量数据库）
+   - PersistentClient(path=...)：本地持久化，数据落盘目录。
+   - 每个学习会话独立 collection：kb_{session_id}，实现资料隔离。
+   - collection 元数据 hnsw:space=cosine 指定距离空间为余弦。
+   - query(query_embeddings=[...], n_results=k)：按向量相似度
+     返回 top-k 文档，距离升序排列。
+   - list_collections / get_collection / delete_collection 管理集合。
+
+3. 文件系统存储
+   - 上传资料存 data/materials/，数据库存元信息（原文件名+路径）。
+   - 知识块存 ChromaDB，同时以 metadatas 记录
+     {session_id, material_id, filename} 便于溯源与删除。
+
+──────────────────────────────────────────────────────────────────
+四、AI 核心算法
+──────────────────────────────────────────────────────────────────
+1. LLM 大语言模型接入
+   - OpenAI SDK 兼容接口（默认 DeepSeek），可换任意兼容服务
+     （改 base_url 即可）。
+   - chat_stream：流式补全（iter over chunks，delta.content 增量）。
+   - chat_once：一次性补全。
+   - chat_json：结构化输出——response_format={"type":"json_object"}
+     强制 JSON 模式；解析前再做"围栏剥离"（去掉 ```json ``` 包裹）
+     + 二次 json.loads 兜底，提高健壮性。
+   - 采样参数 temperature 控制随机性（教学场景低温求稳）。
+
+2. 文本向量化（Embedding）
+   - 模型：BAAI/bge-small-zh-v1.5（中文小模型，512 维输出）。
+   - 库：sentence-transformers，encode() 批量编码。
+   - normalize_embeddings=True：向量 L2 归一化到单位球——
+     归一化后点积 == 余弦相似度，且消除文本长度对模长的干扰。
+   - 懒加载单例：全局 _model，首次调用才加载（启动提速，
+     打包模式加载内置模型目录，开发模式支持 HF_ENDPOINT 镜像下载）。
+
+3. 余弦相似度（相似性度量）
+   - sim(a,b) = a·b / (|a|·|b|)，值域 [-1,1]，越大越相似。
+   - 归一化后退化为内积；ChromaDB cosine 空间的"距离"= 1 - 相似度，
+     检索结果按距离升序即相似度降序。
+
+4. HNSW 近似最近邻搜索（ANN 索引）
+   - ChromaDB 底层索引算法（Hierarchical Navigable Small World）。
+   - 原理：多层跳表式图结构，上层稀疏长边快速"高速公路"定位，
+     下层稠密短边精确逼近；查询从顶层贪心下行，复杂度近似
+     O(log N)，牺牲少量召回率换取大规模向量毫秒级检索。
+   - 对比暴力检索 O(N·d)：千块以上资料时优势明显。
+
+5. RAG 检索增强生成（完整管线，本项目为纯向量检索、无 BM25）
+   ① 文件解析：txt/md（utf-8 失败回退 gbk）、pdf（pypdf 逐页
+      extract_text）、docx（python-docx 段落 + 表格单元格）。
+   ② 清洗：正则 \s+ → 单空格，压缩换行/制表符/连续空白。
+   ③ 分块：滑动窗口——chunk_size=500 字符，重叠 overlap=80，
+      步长 step=420；重叠保证跨块语义（如术语定义被切断）不丢失。
+   ④ 向量化：批量 encode 得到归一化向量。
+   ⑤ 入库：collection.add(ids/documents/metadatas/embeddings)，
+      id 形如 s{sid}_m{mid}_i{i} 保证全局唯一。
+   ⑥ 检索：用户消息 → embed_query → query top-k → 文本块拼入
+      提示词 reference 段，作为"教材依据"供 LLM 引用。
+   ⑦ 容错：检索任何异常静默返回空列表，不影响教学主流程。
+
+──────────────────────────────────────────────────────────────────
+五、提示词工程（Prompt Engineering）
+──────────────────────────────────────────────────────────────────
+1. 结构化提示词分层组装
+   - _COMMON_TUTOR_RULES：六方法共享的教学规则（2-5 句话、
+     巩固轮规则、缺资料引导、换方法引导）。
+   - _CTX_TUTOR：上下文模板，占位符 {topic}{points}
+     {current_point}{reference}，str.format 填充。
+   - 方法专属段：MethodSpec.persona（人格）+ pedagogy（教法）
+     + plan_hint/review_hint（计划/复盘策略），按方法拼装——
+     同一份教学引擎驱动六种教学风格。
+
+2. 评估块协议（模型输出后处理）
+   - 约定 LLM 在回复末尾输出 `<<<EVAL>>>{json}`：
+     emotion(表情)/understood(理解度)/mastery_delta(掌握度增量)
+     /action(下一步动作)/mastered(是否掌握)。
+   - action 枚举：probe(追问)/hint(提示)/continue(继续)
+     /next_point(下一点)/need_material(要资料)/finish(结束)。
+   - 解析算法：以 <<<EVAL>>> 标记 split，前段给用户渲染，
+     后段 json.loads（容错剥围栏）驱动状态机。
+
+3. 花括号免疫设计
+   - JSON 示例段（_EVAL_TUTOR_DOC）不经过 str.format——纯文本
+     拼接，单花括号原样保留；只有 _CTX 子模板经 format。
+     从根上避免"提示词里的 JSON 示例被 format 吃掉花括号"。
+
+4. 硬约束输出格式
+   - 学习总结必须以"学习总结"开头；阶段奖励必须以"🎉 阶段达成"
+     开头——前端/存档依赖前缀识别。
+
+──────────────────────────────────────────────────────────────────
+六、教学状态机与学习科学原理
+──────────────────────────────────────────────────────────────────
+1. 会话级状态机（Finite State Machine）
+   planning（规划）→ learning（学习）→ review（查漏补缺）→ done（完成）
+   - planning：LLM 生成学习计划（JSON：知识点列表+描述），入库。
+   - learning：逐点教学，LLM 通过 action 建议驱动推进。
+   - review：全部点学完后，针对 weak 点复盘追问。
+   - done：生成学习总结。
+   非法跳转一律拒绝，状态迁移由后端判定（前端只展示）。
+
+2. 知识点级掌握度模型
+   - 每个知识点 mastery 0-100，阈值 80 判定达标。
+   - LLM 每轮给出 mastery_delta 增量，后端累加并 clamp 到 [0,100]。
+   - 首次达标进入 consolidating（巩固轮）：先发"阶段奖励"庆祝
+     （仪式感强化正向反馈）→ 再出一道验收题确认 → 通过才
+     mastered；不通过降级回 learning。状态：
+     pending → learning → consolidating → mastered / weak。
+
+3. 六种学习方法的教育心理学原理
+   ① 苏格拉底提问法（思小诘）：产婆术——不直接给答案，用追问
+     （反例、边界、为什么）暴露思维漏洞，引导自省建构知识。
+   ② 费曼学习法（费小曼）：以教代学——让用户把概念讲给"小白"
+     听，AI 扮演学生追问卡壳处；能简化复述=真正理解。
+   ③ 格物致知（格小致）：实践导向探究——"学 Python 就给示例代码"：
+     格物（呈现真实可跑代码与运行结果）→ 穷理（追问原理）
+     → 致用（动手改代码/写代码验证）。
+   ④ 间隔复习法（温小习）：基于艾宾浩斯遗忘曲线——记忆随时间
+     衰减先快后慢，按 1天/3天/7天等间隔重访旧知识点，对抗遗忘。
+   ⑤ SQ3R 阅读法（阅小思）：Survey浏览 → Question提问 →
+     Read阅读 → Recite复述 → Review复习，五步把被动阅读变为
+     主动加工。
+   ⑥ 检索练习法（检小索）：测试效应/必要难度理论——合上书本、
+     主动回想知识点；大脑努力回忆的过程才是强化记忆的关键，
+     反复重读和划线只制造"熟悉感的错觉"。
+   （同一掌握度/状态机引擎，仅提示词层的人格、教法、计划策略不同。）
+
+4. 规划算法（学习计划拆解）
+   - chat_json 强制 JSON 输出知识点数组 → 校验结构 → 逐点入库
+     （pending）；无效 JSON 自动重试/回退默认计划。
+
+──────────────────────────────────────────────────────────────────
+七、语音合成（TTS）
+──────────────────────────────────────────────────────────────────
+1. edge-tts（在线）：微软 Edge 神经语音，多个中文音色可选，
+   音质好但需联网。
+2. pyttsx3（离线降级）：Windows SAPI5 引擎，无网时兜底。
+3. 播放模型：音频队列——回复生成完入队，串行播放，可打断；
+   语音开关状态 localStorage 持久化（eduragtutor_voice）。
+4. 音色试听：预览接口即时合成短句。
+
+──────────────────────────────────────────────────────────────────
+八、前端技术（原生 JS，零框架）
+──────────────────────────────────────────────────────────────────
+1. SSE 流式客户端：fetch + ReadableStream.getReader() 逐块读，
+   TextDecoder 解码，缓冲区按 \n\n 切帧，残帧留待下块拼接；
+   打字机效果逐字渲染，流中禁用输入（streaming 锁）。
+2. DOM 动态渲染：消息列表/进度条/计划列表全部 createElement
+   手工构建；人物名 8 处动态化（欢迎语/思考中/toast/alt 等）。
+3. 人物形象系统：
+   - 后端 /api/methods 现扫磁盘返回 methods 清单（支持热放图）。
+   - 逐表情回退算法：方法目录缺图 → 回退 default 同名表情 →
+     前端 onerror 再兜底一次（dataset.fallback 防死循环）。
+   - 表情集：idle/think/happy/encourage/surprise，随 LLM 评估
+     emotion 字段切换立绘。
+4. 状态持久化：localStorage——eduragtutor_method（上次方法）、
+   eduragtutor_voice、eduragtutor_focus（专注模式）。
+5. 缓存击穿：静态资源 ?v=N 版本参数（css?v=8 / js?v=7），
+   改版后强刷旧缓存。
+6. CSS：变量主题（--ink/--pink 等）、keyframes 动画、
+   .hidden 显隐控制、modal 遮罩点击关闭、.locked 防双击。
+
+──────────────────────────────────────────────────────────────────
+九、桌面工程与打包
+──────────────────────────────────────────────────────────────────
+1. pywebview：把本地 FastAPI 页面装进原生窗口（Windows 用
+   EdgeChromium WebView2）；失败回退默认浏览器打开，保证可用。
+2. PyInstaller 打包：
+   - collect_submodules 兜住动态导入库（chromadb /
+     sentence_transformers / webview 的隐式 import）。
+   - console=False 模式下 sys.stdout/stderr 为 None——日志重定向
+     到文件前必须判空替换，否则启动即崩。
+   - 资源路径双模式：开发用 PROJECT_ROOT，打包用 sys._MEIPASS
+     （BUNDLE_DIR），get_paths() 统一适配。
+   - Embedding 模型内置进包，免下载。
+3. Inno Setup：生成 Windows 安装器。
+4. 模型下载加速：HF_ENDPOINT 指向国内镜像。
+
+──────────────────────────────────────────────────────────────────
+十、软件工程实践
+──────────────────────────────────────────────────────────────────
+1. 单例模式：Embedding 模型全局唯一实例（懒加载）。
+2. 热配置：prefs 表 + get_settings() 每次现读，改 Key/模型即时生效。
+3. 优雅降级链：edge-tts→pyttsx3；方法图→default 图→前端 onerror；
+   检索异常→空列表继续教学；JSON 解析→剥围栏重试。
+4. 幂等性：建表/加列/集合创建全部可重复执行，任意次启动状态一致。
+5. 编码健壮性：utf-8 → gbk 回退读文件；utf-8-sig 兼容记事本 BOM。
+6. 防御式前端：防双击锁、onerror 兜底、localStorage 缺省值、
+   fetch 失败 toast 提示。
+7. 教学主流程与增强功能解耦：语音/检索/资料任一失败不阻断对话。
+
+════════════════════════════════════════════════════════════════════
+结语：本项目以"教学状态机 + 提示词工程"为大脑，以"RAG 向量检索"
+为教材库，以 FastAPI/SSE 为神经，以 pywebview 为躯壳，将六种经典
+学习方法的科学原理落成可交互的桌面学习伙伴。
+════════════════════════════════════════════════════════════════════

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>思小诘 · 苏格拉底学习助手</title>
-  <link rel="stylesheet" href="css/style.css?v=7" />
+  <title>Edu-RAG-Tutor</title>
+  <link rel="stylesheet" href="css/style.css?v=12" />
 </head>
 <body>
 <div id="app">
@@ -21,8 +21,8 @@
       <div id="char-bubble" class="char-bubble"></div>
     </div>
     <div class="stage-info">
-      <div class="stage-name">思小诘</div>
-      <div class="stage-sub">你的苏格拉底学习伙伴</div>
+      <div id="stage-name" class="stage-name">思小诘</div>
+      <div id="stage-sub" class="stage-sub">你的苏格拉底学习伙伴</div>
     </div>
     <div class="stage-controls">
       <button id="voice-btn" class="voice-btn" title="语音开关">🔊</button>
@@ -69,7 +69,10 @@
     <!-- ② 学习资料 -->
     <section class="panel card">
       <h3 class="panel-title">📎 学习资料</h3>
-      <label class="upload-label" for="material-input">＋ 上传资料（.txt .md .pdf .docx）</label>
+      <div class="material-head">
+        <label class="upload-label" for="material-input">＋ 上传资料</label>
+        <button id="websearch-btn" class="mini-btn" type="button" title="联网搜索电子版学习资料">🌐 找资料</button>
+      </div>
       <input type="file" id="material-input" class="hidden" accept=".txt,.md,.pdf,.docx" />
       <div id="material-list" class="material-list"></div>
     </section>
@@ -113,18 +116,6 @@
       <input type="text" id="set-model" placeholder="deepseek-chat" autocomplete="off" />
     </div>
 
-    <div class="form-row">
-      <label for="set-skin">形象皮肤</label>
-      <select id="set-skin"></select>
-    </div>
-
-    <div class="form-row">
-      <label for="set-voice">语音音色
-        <button id="preview-voice-btn" class="link-btn" type="button">▶ 试听</button>
-      </label>
-      <select id="set-voice"></select>
-    </div>
-
     <div id="test-result" class="test-result hidden"></div>
 
     <div class="modal-actions">
@@ -151,6 +142,77 @@
   </div>
 </div>
 
-<script src="js/app.js?v=6"></script>
+<!-- 学习方法选择弹窗：「＋ 新的学习」先选方法再创建会话 -->
+<div id="method-modal" class="modal-mask hidden">
+  <div class="modal card method-modal">
+    <div class="history-head">
+      <h3 class="modal-title">🧭 选择学习方法</h3>
+      <button id="method-close" class="mini-btn" type="button">关闭</button>
+    </div>
+    <p class="method-tip">每种方法有专属的学习伙伴和节奏；选定后本次学习不可更换，想换方法就点「＋ 新的学习」重新开始～</p>
+    <div id="method-grid" class="method-grid"></div>
+  </div>
+</div>
+
+<!-- 学前测评弹窗：摸底出题 → 答题 → 判分并规划多方法学习路线 -->
+<div id="assess-modal" class="modal-mask hidden">
+  <div class="modal card assess-modal">
+    <div class="history-head">
+      <h3 class="modal-title">🧭 学前测评</h3>
+      <button id="assess-close" class="mini-btn" type="button">关闭</button>
+    </div>
+
+    <!-- 第一步：主题输入 -->
+    <div id="assess-step-setup">
+      <p class="method-tip">先做 10 道左右的摸底选择题，大致判断你的掌握程度，再为你定制一条「先用什么方法学、学到什么程度、再换什么方法巩固」的学习路线。</p>
+      <div class="form-row">
+        <label for="assess-topic">想学什么？</label>
+        <input type="text" id="assess-topic" placeholder="如：Python 基础、线性代数、英语语法…" autocomplete="off" />
+      </div>
+      <div class="modal-actions">
+        <span class="sp"></span>
+        <button id="assess-start-btn" class="primary-btn" type="button">开始出题 ✨</button>
+      </div>
+    </div>
+
+    <!-- 第二步：答题 -->
+    <div id="assess-step-quiz" class="hidden">
+      <div id="assess-quiz-hint" class="panel-hint"></div>
+      <div id="assess-quiz-list" class="quiz-list"></div>
+      <div class="modal-actions">
+        <button id="assess-requiz-btn" class="link-btn" type="button">换一套题</button>
+        <span class="sp"></span>
+        <button id="assess-submit-btn" class="primary-btn" type="button">交卷看结果</button>
+      </div>
+    </div>
+
+    <!-- 第三步：结果与学习路线 -->
+    <div id="assess-step-result" class="hidden"></div>
+  </div>
+</div>
+
+<!-- 联网找资料弹窗：搜索电子版学习资料，可下载入库或浏览器打开 -->
+<div id="search-modal" class="modal-mask hidden">
+  <div class="modal card search-modal">
+    <div class="history-head">
+      <h3 class="modal-title">🌐 联网找资料</h3>
+      <button id="search-close" class="mini-btn" type="button">关闭</button>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="想找什么资料？如：Python 入门、线性代数讲义…" autocomplete="off" />
+      <button id="search-go-btn" class="primary-btn" type="button">🔍 搜索</button>
+    </div>
+    <div id="type-chips" class="type-chips">
+      <button class="chip active" data-type="all" type="button">全部</button>
+      <button class="chip" data-type="pdf" type="button">PDF</button>
+      <button class="chip" data-type="ppt" type="button">PPT</button>
+      <button class="chip" data-type="doc" type="button">Word</button>
+    </div>
+    <div id="search-results" class="search-results"></div>
+    <div id="search-status" class="panel-hint">搜到的文档（.txt .md .pdf .docx）可一键下载到学习资料库；网页类资料请用浏览器打开～</div>
+  </div>
+</div>
+
+<script src="js/app.js?v=12"></script>
 </body>
 </html>

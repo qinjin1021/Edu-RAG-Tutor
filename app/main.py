@@ -21,7 +21,15 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import routes_chat, routes_material, routes_misc, routes_session, routes_settings
+from app.api import (
+    routes_assessment,
+    routes_chat,
+    routes_material,
+    routes_misc,
+    routes_search,
+    routes_session,
+    routes_settings,
+)
 from app.config import BUNDLE_DIR, IS_FROZEN, PROJECT_ROOT, get_settings
 from app.db.database import init_db
 
@@ -35,11 +43,13 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="思小诘 · 苏格拉底学习助手", lifespan=lifespan)
+app = FastAPI(title="Edu-RAG-Tutor", lifespan=lifespan)
 
 app.include_router(routes_session.router)
 app.include_router(routes_chat.router)
+app.include_router(routes_assessment.router)
 app.include_router(routes_material.router)
+app.include_router(routes_search.router)
 app.include_router(routes_misc.router)
 app.include_router(routes_settings.router)
 
@@ -113,7 +123,7 @@ def main() -> None:
     threading.Thread(target=server.run, daemon=True).start()
 
     # 无窗口模式：仅启动后端服务（用于打包产物自动化测试等场景）
-    if os.environ.get("SIXIAOJIE_NO_WINDOW") == "1":
+    if os.environ.get("EDURAGTUTOR_NO_WINDOW") == "1":
         print(f"服务已启动：{url}（无窗口模式，Ctrl+C 退出）")
         try:
             while True:
@@ -128,7 +138,7 @@ def main() -> None:
         import webview
 
         webview.create_window(
-            "思小诘 · 苏格拉底学习助手",
+            "Edu-RAG-Tutor",
             url,
             width=1280,
             height=820,

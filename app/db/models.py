@@ -5,20 +5,21 @@
 
 from app.db.database import get_conn, now_str
 
-# update_session 允许修改的字段白名单
-_SESSION_FIELDS = {"topic", "status", "replan_pending"}
+# update_session 允许修改的字段白名单（method 创建后原则上不可变，仅为防未来静默丢字段）
+_SESSION_FIELDS = {"topic", "status", "method", "replan_pending"}
 
 
 # ---------- 会话 ----------
 
-def create_session() -> int:
-    """新建会话，返回 id。"""
+def create_session(method: str = "socratic") -> int:
+    """新建会话（指定学习方法），返回 id。"""
     conn = get_conn()
     try:
         ts = now_str()
         cur = conn.execute(
-            "INSERT INTO sessions (topic, created_at, updated_at) VALUES ('', ?, ?)",
-            (ts, ts),
+            "INSERT INTO sessions (topic, status, method, created_at, updated_at) "
+            "VALUES ('', 'planning', ?, ?, ?)",
+            (method, ts, ts),
         )
         conn.commit()
         return cur.lastrowid
@@ -269,6 +270,50 @@ def delete_material(mid) -> None:
     conn = get_conn()
     try:
         conn.execute("DELETE FROM materials WHERE id = ?", (mid,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------- 学前测评 ----------
+
+def create_assessment(topic: str, questions: str) -> int:
+    """新建学前测评记录（questions 为含答案的题目 JSON 字符串），返回 id。"""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO assessments (topic, questions, created_at) VALUES (?, ?, ?)",
+            (topic, questions, now_str()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_assessment(aid) -> dict | None:
+    """按 id 查测评记录，不存在返回 None。"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM assessments WHERE id = ?", (aid,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_assessment_result(
+    aid, answers: str, score: int, total: int, level: str, route: str
+) -> None:
+    """写入判分与路线规划结果。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE assessments SET answers = ?, score = ?, total = ?, "
+            "level = ?, route = ? WHERE id = ?",
+            (answers, score, total, level, route, aid),
+        )
         conn.commit()
     finally:
         conn.close()

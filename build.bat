@@ -1,9 +1,9 @@
 @echo off
 chcp 65001 >nul
 REM ============================================================
-REM  思小诘学习助手 - 一键打包脚本
-REM  产物1: dist\SiXiaoJie\SiXiaoJie.exe        (绿色版，可直接运行)
-REM  产物2: installer\SiXiaoJie-Setup-1.0.0.exe (安装包，分发用)
+REM  Edu-RAG-Tutor 学习助手 - 一键打包脚本
+REM  产物1: dist\EduRAGTutor\EduRAGTutor.exe            (绿色版，可直接运行)
+REM  产物2: installer\EduRAGTutor-Setup-1.1.0.exe (安装包，分发用)
 REM  依赖:   .venv (已装 requirements.txt + pyinstaller) / Inno Setup 6
 REM ============================================================
 setlocal enabledelayedexpansion
@@ -16,13 +16,13 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo [1/2] PyInstaller 构建中（首次约需 5-15 分钟，请耐心等待）...
-".venv\Scripts\python.exe" -m PyInstaller sixiaojie.spec --noconfirm --clean --distpath dist --workpath build
+".venv\Scripts\python.exe" -m PyInstaller EduRAGTutor.spec --noconfirm --clean --distpath dist --workpath build
 if errorlevel 1 (
     echo [错误] PyInstaller 构建失败，请检查上方日志
     pause
     exit /b 1
 )
-echo       构建完成: dist\SiXiaoJie\SiXiaoJie.exe
+echo       构建完成: dist\EduRAGTutor\EduRAGTutor.exe
 
 set "ISCC="
 if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
@@ -46,7 +46,7 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo  打包完成！
-echo    安装包: installer\SiXiaoJie-Setup-1.0.0.exe
-echo    绿色版: dist\SiXiaoJie\SiXiaoJie.exe
+echo    安装包: installer\EduRAGTutor-Setup-1.1.0.exe
+echo    绿色版: dist\EduRAGTutor\EduRAGTutor.exe
 echo ============================================================
 pause

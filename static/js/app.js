@@ -1,4 +1,4 @@
-/* 思小诘 · 苏格拉底学习助手 —— 前端逻辑（原生 JS，无依赖） */
+/* Edu-RAG-Tutor —— 前端逻辑（原生 JS，无依赖） */
 'use strict';
 
 /* ---------- 常量 ---------- */
@@ -13,6 +13,8 @@ const els = {
   characterImg: $('character-img'),
   voiceBtn: $('voice-btn'),
   phaseLabel: $('phase-label'),
+  stageName: $('stage-name'),
+  stageSub: $('stage-sub'),
   topicText: $('topic-text'),
   messageList: $('message-list'),
   chatInput: $('chat-input'),
@@ -42,19 +44,39 @@ const els = {
   settingsCancel: $('settings-cancel'),
   settingsSave: $('settings-save'),
   clearKeyBtn: $('clear-key-btn'),
-  setSkin: $('set-skin'),
-  setVoice: $('set-voice'),
-  previewVoiceBtn: $('preview-voice-btn'),
   charBubble: $('char-bubble'),
   focusBtn: $('focus-btn'),
   historyBtn: $('history-btn'),
   historyModal: $('history-modal'),
   historyClose: $('history-close'),
+  methodModal: $('method-modal'),
+  methodClose: $('method-close'),
+  methodGrid: $('method-grid'),
+  webSearchBtn: $('websearch-btn'),
+  searchModal: $('search-modal'),
+  searchClose: $('search-close'),
+  searchInput: $('search-input'),
+  searchGoBtn: $('search-go-btn'),
+  typeChips: $('type-chips'),
+  searchResults: $('search-results'),
+  searchStatus: $('search-status'),
+  // 学前测评弹窗
+  assessModal: $('assess-modal'),
+  assessClose: $('assess-close'),
+  assessStepSetup: $('assess-step-setup'),
+  assessTopic: $('assess-topic'),
+  assessStartBtn: $('assess-start-btn'),
+  assessStepQuiz: $('assess-step-quiz'),
+  assessQuizHint: $('assess-quiz-hint'),
+  assessQuizList: $('assess-quiz-list'),
+  assessRequizBtn: $('assess-requiz-btn'),
+  assessSubmitBtn: $('assess-submit-btn'),
+  assessStepResult: $('assess-step-result'),
 };
 
 /* ---------- 全局状态 ---------- */
 const state = {
-  session: null,       // 当前会话 {id, topic, status, progress...}
+  session: null,       // 当前会话 {id, topic, status, method, progress...}
   phase: 'planning',   // 当前阶段
   emotion: 'idle',     // 当前立绘表情
   points: [],          // 知识点
@@ -63,14 +85,19 @@ const state = {
   currentPointId: null,
   progress: 0,
   streaming: false,  // 是否正在接收 SSE 流
-  voiceOn: localStorage.getItem('sixiaojie_voice') !== '0', // 语音默认开
+  voiceOn: localStorage.getItem('eduragtutor_voice') !== '0', // 语音默认开
   llmReady: false,   // 大模型 API 是否已配置（有 Key）
-  // 皮肤系统：skin=当前皮肤ID，skinFiles=表情→文件名映射，skins=后端扫描的皮肤清单
-  skin: 'default',
-  skinFiles: { idle: 'idle.png', think: 'think.png', happy: 'happy.png', encourage: 'encourage.png', surprise: 'surprise.png' },
-  skins: [],
+  // 学习方法系统：method=当前方法对象（含人物/表情图回退映射），methods=后端清单
+  method: null,
+  methods: [],
+  // 联网找资料：searchType=类型筛选，searchQuery=上次搜索词，downloadingUrl=防重复下载
+  searchType: 'all',
+  searchQuery: '',
+  downloadingUrl: null,
   // 专注模式：开启后隐藏左侧形象面板（本地持久化）
-  focusOn: localStorage.getItem('sixiaojie_focus') === '1',
+  focusOn: localStorage.getItem('eduragtutor_focus') === '1',
+  // 学前测评：当前测评流程 {id, topic, questions, answers}
+  assess: null,
 };
 
 /* ---------- 初始化 ---------- */
@@ -81,7 +108,8 @@ function init() {
   showWelcome();
   renderMaterials();
   loadSessions();
-  loadSettings(); // 读取配置+皮肤音色；未配置 API Key 时弹出首启向导
+  loadSettings(); // 读取配置+音色；未配置 API Key 时弹出首启向导
+  loadMethods().then(() => applyCharacter(findMethod(lastMethodId()))); // 恢复上次人物
   scheduleIdleAction(); // 待机随机小动作，让角色"活"起来
 
   // 健康检查，失败仅提示一次
@@ -96,10 +124,17 @@ function bindEvents() {
   els.chatInput.addEventListener('input', autoResizeInput);
 
   els.voiceBtn.addEventListener('click', toggleVoice);
-  els.newSessionBtn.addEventListener('click', () => { closeHistory(); createSession(); });
+  els.newSessionBtn.addEventListener('click', () => { closeHistory(); openMethodModal(); });
   els.settingsBtn.addEventListener('click', () => openSettings(false));
   els.characterImg.addEventListener('click', pokeCharacter); // 点击立绘互动
-  els.previewVoiceBtn.addEventListener('click', previewVoice); // 音色试听
+
+  // 主立绘加载失败兜底：切回 default 同名表情（打标防死循环）
+  els.characterImg.addEventListener('error', () => {
+    if (els.characterImg.dataset.fallback) return;
+    els.characterImg.dataset.fallback = '1';
+    els.characterImg.src = `assets/character/default/${state.emotion}.png`;
+  });
+  els.characterImg.addEventListener('load', () => { delete els.characterImg.dataset.fallback; });
 
   // 专注模式：隐藏左侧形象面板
   els.focusBtn.addEventListener('click', toggleFocus);
@@ -108,6 +143,43 @@ function bindEvents() {
   els.historyClose.addEventListener('click', closeHistory);
   els.historyModal.addEventListener('click', (ev) => {
     if (ev.target === els.historyModal) closeHistory();
+  });
+
+  // 学习方法选择弹窗
+  els.methodClose.addEventListener('click', closeMethodModal);
+  els.methodModal.addEventListener('click', (ev) => {
+    if (ev.target === els.methodModal) closeMethodModal();
+  });
+
+  // 学前测评弹窗
+  els.assessClose.addEventListener('click', closeAssessModal);
+  els.assessModal.addEventListener('click', (ev) => {
+    if (ev.target === els.assessModal) closeAssessModal();
+  });
+  els.assessStartBtn.addEventListener('click', startAssessment);
+  els.assessTopic.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); startAssessment(); }
+  });
+  els.assessSubmitBtn.addEventListener('click', submitAssessment);
+  els.assessRequizBtn.addEventListener('click', startAssessment);
+
+  // 联网找资料弹窗
+  els.webSearchBtn.addEventListener('click', openSearchModal);
+  els.searchClose.addEventListener('click', closeSearchModal);
+  els.searchModal.addEventListener('click', (ev) => {
+    if (ev.target === els.searchModal) closeSearchModal();
+  });
+  els.searchGoBtn.addEventListener('click', performSearch);
+  els.searchInput.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') { ev.preventDefault(); performSearch(); }
+  });
+  els.typeChips.addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (!chip) return;
+    els.typeChips.querySelectorAll('.chip').forEach((c) => c.classList.remove('active'));
+    chip.classList.add('active');
+    state.searchType = chip.dataset.type;
+    if (state.searchQuery) performSearch(); // 已有搜索词：切类型立即重搜
   });
 
   // 设置弹窗
@@ -140,7 +212,7 @@ function autoResizeInput() {
 /* ---------- 语音开关 ---------- */
 function toggleVoice() {
   state.voiceOn = !state.voiceOn;
-  localStorage.setItem('sixiaojie_voice', state.voiceOn ? '1' : '0');
+  localStorage.setItem('eduragtutor_voice', state.voiceOn ? '1' : '0');
   applyVoiceUI();
   if (!state.voiceOn) stopTts();
 }
@@ -154,7 +226,7 @@ function applyVoiceUI() {
 /* ---------- 专注模式 ---------- */
 function toggleFocus() {
   state.focusOn = !state.focusOn;
-  localStorage.setItem('sixiaojie_focus', state.focusOn ? '1' : '0');
+  localStorage.setItem('eduragtutor_focus', state.focusOn ? '1' : '0');
   applyFocusUI();
 }
 
@@ -174,26 +246,420 @@ function closeHistory() {
   els.historyModal.classList.add('hidden');
 }
 
-/* ---------- 皮肤与立绘图源 ---------- */
-/* 按当前皮肤取表情图路径：assets/character/<皮肤>/<表情文件>（支持 png/gif/webp 混用） */
+/* ---------- 学习方法与人物形象 ---------- */
+function lastMethodId() {
+  return localStorage.getItem('eduragtutor_method') || 'socratic';
+}
+
+/* 当前人物名（清单未加载时兜底思小诘） */
+function charName() {
+  return (state.method && state.method.char_name) || '思小诘';
+}
+
+/* 按当前方法取表情图路径（后端 resolved 已逐表情回退 default，这里再兜底一层） */
 function charAsset(emotion) {
-  const f = state.skinFiles[emotion] || `${emotion}.png`;
-  return `assets/character/${state.skin}/${f}`;
+  const m = state.method;
+  if (m && m.resolved && m.resolved[emotion]) return m.resolved[emotion];
+  return `assets/character/default/${emotion}.png`;
 }
 
-/* 预加载当前皮肤全部表情，切换时不闪烁 */
-function preloadSkin() {
-  EMOTIONS.forEach((e) => { const img = new Image(); img.src = charAsset(e); });
+/* 拉取学习方法清单（force=每次现拉，支持热放图） */
+async function loadMethods(force = false) {
+  if (state.methods.length && !force) return state.methods;
+  try {
+    const res = await fetch('/api/methods');
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    state.methods = data.methods || [];
+  } catch (e) { /* 失败保留空清单，charAsset 有兜底 */ }
+  return state.methods;
 }
 
-/* 应用皮肤：更新映射 → 刷新当前立绘 → 预加载（聊天头像/思考头像在渲染时实时取 charAsset） */
-function applySkin(skinId) {
-  const skin = state.skins.find((s) => s.id === skinId);
-  if (!skin) return;
-  state.skin = skin.id;
-  state.skinFiles = skin.files || state.skinFiles;
+function findMethod(id) {
+  return state.methods.find((m) => m.id === id) || state.methods[0] || null;
+}
+
+/* 应用人物：更新方法态 → 名字/头衔/立绘 → 预加载表情 → 刷新输入框提示 */
+function applyCharacter(methodObj) {
+  if (methodObj) state.method = methodObj;
+  els.stageName.textContent = charName();
+  els.stageSub.textContent = (state.method && state.method.char_title) || '你的学习伙伴';
+  els.characterImg.alt = `${charName()}立绘`;
   els.characterImg.src = charAsset(state.emotion);
-  preloadSkin();
+  EMOTIONS.forEach((e) => { const img = new Image(); img.src = charAsset(e); }); // 预加载
+  updateInputPlaceholder();
+}
+
+/* 输入框提示随人物变化 */
+function updateInputPlaceholder() {
+  if (!state.streaming) {
+    els.chatInput.placeholder = `和${charName()}聊聊你想学什么…（Enter 发送，Shift+Enter 换行）`;
+  }
+}
+
+/* ---------- 学习方法选择弹窗 ---------- */
+async function openMethodModal() {
+  await loadMethods(true); // 每次打开现拉，热放图立即生效
+  renderMethodCards();
+  els.methodModal.classList.remove('hidden');
+}
+
+function closeMethodModal() {
+  els.methodModal.classList.add('hidden');
+}
+
+/* 渲染方法卡片网格（头像取 resolved.idle，无专属图时即 default 图） */
+function renderMethodCards() {
+  els.methodGrid.innerHTML = '';
+  renderAssessCard(); // 固定在首位的"学前测评"入口卡
+  state.methods.forEach((m) => {
+    const card = document.createElement('div');
+    card.className = 'method-card';
+    card.dataset.id = m.id;
+    card.title = m.name;
+
+    const av = document.createElement('img');
+    av.className = 'm-avatar';
+    av.alt = m.char_name;
+    av.src = (m.resolved && m.resolved.idle) || `assets/character/default/idle.png`;
+
+    const body = document.createElement('div');
+    body.className = 'm-body';
+    const title = document.createElement('div');
+    title.className = 'm-title';
+    title.textContent = `${m.emoji || ''} ${m.name}`.trim();
+    const char = document.createElement('div');
+    char.className = 'm-char';
+    char.textContent = `伙伴：${m.char_name}`;
+    if (!m.has_own_assets) {
+      const tag = document.createElement('span');
+      tag.className = 'm-asset-tag';
+      tag.textContent = '形象待放入';
+      tag.title = '把人物图片放入对应 character 目录即可显示专属形象';
+      char.appendChild(tag);
+    }
+    const intro = document.createElement('div');
+    intro.className = 'm-intro';
+    intro.textContent = m.intro || '';
+    body.appendChild(title);
+    body.appendChild(char);
+    body.appendChild(intro);
+
+    // 试听按钮：阻止冒泡，避免触发卡片的"选择该方法"
+    const voiceBtn = document.createElement('button');
+    voiceBtn.className = 'mini-btn m-voice';
+    voiceBtn.type = 'button';
+    voiceBtn.textContent = '🔊 试听';
+    if (m.voice) voiceBtn.title = `音色：${m.voice}${m.voice_custom ? '（自定义语音包）' : ''}`;
+    voiceBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      previewMethodVoice(m, voiceBtn);
+    });
+
+    card.appendChild(av);
+    card.appendChild(body);
+    card.appendChild(voiceBtn);
+    card.addEventListener('click', () => selectMethod(m.id));
+    els.methodGrid.appendChild(card);
+  });
+}
+
+/* 选定方法 → 创建新学习会话 */
+async function selectMethod(id) {
+  els.methodGrid.classList.add('locked'); // 防双击重复建会话
+  try {
+    closeMethodModal();
+    const s = await createSession(id);
+    if (s) {
+      const m = findMethod(id);
+      toast(m ? `已开始「${m.name}」，伙伴：${m.char_name}` : '新学习已创建', 'success');
+    }
+  } finally {
+    els.methodGrid.classList.remove('locked');
+  }
+}
+
+/* ---------- 学前测评（摸底出题 → 答题 → 判分并规划路线） ---------- */
+
+/* 固定在方法清单首位的测评入口卡 */
+function renderAssessCard() {
+  const card = document.createElement('div');
+  card.className = 'method-card assess-card';
+  card.title = '学前测评 · 定制学习路线';
+
+  const av = document.createElement('div');
+  av.className = 'm-avatar assess-avatar';
+  av.textContent = '🧭';
+
+  const body = document.createElement('div');
+  body.className = 'm-body';
+  const title = document.createElement('div');
+  title.className = 'm-title';
+  title.textContent = '🧭 学前测评';
+  const sub = document.createElement('div');
+  sub.className = 'm-char';
+  sub.textContent = '先摸底，再定制学习路线';
+  const intro = document.createElement('div');
+  intro.className = 'm-intro';
+  intro.textContent = '做约 10 道摸底选择题，判断掌握程度，规划"先学什么、再拿什么方法巩固"的多阶段路线';
+  body.appendChild(title);
+  body.appendChild(sub);
+  body.appendChild(intro);
+
+  card.appendChild(av);
+  card.appendChild(body);
+  card.addEventListener('click', () => {
+    closeMethodModal();
+    openAssessModal();
+  });
+  els.methodGrid.appendChild(card);
+}
+
+/* 打开测评弹窗（prefill=预填主题，如用户刚输入的话） */
+function openAssessModal(prefill = '') {
+  state.assess = null;
+  els.assessStepSetup.classList.remove('hidden');
+  els.assessStepQuiz.classList.add('hidden');
+  els.assessStepResult.classList.add('hidden');
+  els.assessStepResult.innerHTML = '';
+  if (prefill) els.assessTopic.value = prefill;
+  els.assessModal.classList.remove('hidden');
+  els.assessTopic.focus();
+  loadMethods(); // 预载方法清单，路线阶段卡才能显示方法名与 emoji
+}
+
+function closeAssessModal() {
+  els.assessModal.classList.add('hidden');
+}
+
+/* 第一步 → 第二步：请求出题（「换一套题」也走这里） */
+async function startAssessment() {
+  const topic = els.assessTopic.value.trim();
+  if (!topic) { toast('请先填写想学的主题', 'error'); return; }
+  if (!state.llmReady) {
+    toast('请先配置大模型 API（右上角 ⚙️）', 'error');
+    closeAssessModal();
+    openSettings(true);
+    return;
+  }
+  els.assessStartBtn.disabled = true;
+  els.assessStartBtn.textContent = '出题中…';
+  els.assessRequizBtn.disabled = true;
+  try {
+    const res = await fetch('/api/assessment/quiz', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.status);
+    state.assess = { id: data.id, topic, questions: data.questions || [], answers: [] };
+    renderQuiz();
+  } catch (e) {
+    toast(`出题失败：${e.message || '请稍后重试'}`, 'error');
+  } finally {
+    els.assessStartBtn.disabled = false;
+    els.assessStartBtn.textContent = '开始出题 ✨';
+    els.assessRequizBtn.disabled = false;
+  }
+}
+
+/* 渲染答题区（题目由易到难，单选） */
+function renderQuiz() {
+  const qs = state.assess.questions;
+  state.assess.answers = new Array(qs.length).fill(-1);
+  els.assessStepSetup.classList.add('hidden');
+  els.assessStepResult.classList.add('hidden');
+  els.assessStepResult.innerHTML = '';
+  els.assessStepQuiz.classList.remove('hidden');
+  els.assessQuizHint.textContent =
+    `主题「${state.assess.topic}」共 ${qs.length} 道单选题（由易到难）。凭现有理解作答即可，摸底只是分档，答错不影响开始学习～`;
+  els.assessQuizList.innerHTML = '';
+  qs.forEach((q, qi) => {
+    const item = document.createElement('div');
+    item.className = 'quiz-item';
+
+    const title = document.createElement('div');
+    title.className = 'quiz-q';
+    const tag = document.createElement('span');
+    tag.className = 'quiz-tag';
+    tag.textContent = q.difficulty === 'easy' ? '易' : q.difficulty === 'hard' ? '难' : '中';
+    title.appendChild(tag);
+    title.appendChild(document.createTextNode(`${qi + 1}. ${q.question}`));
+    item.appendChild(title);
+
+    const opts = document.createElement('div');
+    opts.className = 'quiz-opts';
+    q.options.forEach((opt, oi) => {
+      const label = document.createElement('label');
+      label.className = 'quiz-opt';
+      const input = document.createElement('input');
+      input.type = 'radio';
+      input.name = `quiz-${qi}`;
+      input.addEventListener('change', () => {
+        state.assess.answers[qi] = oi;
+        updateQuizProgress();
+      });
+      label.appendChild(input);
+      const span = document.createElement('span');
+      span.textContent = `${'ABCD'[oi]}. ${opt}`;
+      label.appendChild(span);
+      opts.appendChild(label);
+    });
+    item.appendChild(opts);
+    els.assessQuizList.appendChild(item);
+  });
+  updateQuizProgress();
+  els.assessModal.scrollTop = 0;
+}
+
+function updateQuizProgress() {
+  const done = state.assess.answers.filter((a) => a >= 0).length;
+  els.assessSubmitBtn.textContent =
+    done >= state.assess.questions.length ? '交卷看结果' : `已答 ${done}/${state.assess.questions.length}`;
+}
+
+/* 第二步 → 第三步：交卷 → 本地判分 + LLM 规划路线 */
+async function submitAssessment() {
+  const unanswered = state.assess.answers.filter((a) => a < 0).length;
+  if (unanswered > 0) { toast(`还有 ${unanswered} 题没作答哦`, 'error'); return; }
+  els.assessSubmitBtn.disabled = true;
+  els.assessSubmitBtn.textContent = '判分规划中…';
+  try {
+    const res = await fetch('/api/assessment/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assessment_id: state.assess.id, answers: state.assess.answers }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.status);
+    renderAssessResult(data);
+  } catch (e) {
+    toast(`提交失败：${e.message || '请稍后重试'}`, 'error');
+  } finally {
+    els.assessSubmitBtn.disabled = false;
+    updateQuizProgress();
+  }
+}
+
+/* 渲染结果：得分 + 逐题复盘 + 多阶段学习路线 */
+function renderAssessResult(result) {
+  els.assessStepQuiz.classList.add('hidden');
+  const box = els.assessStepResult;
+  box.innerHTML = '';
+  box.classList.remove('hidden');
+
+  const head = document.createElement('div');
+  head.className = 'assess-head';
+  head.textContent = `📊 摸底结果：${result.score}/${result.total} · ${result.level || ''}`;
+  box.appendChild(head);
+
+  if (result.summary) {
+    const p = document.createElement('p');
+    p.className = 'assess-summary';
+    p.textContent = result.summary;
+    box.appendChild(p);
+  }
+
+  const review = document.createElement('div');
+  review.className = 'assess-review';
+  result.questions.forEach((q, qi) => {
+    const ok = result.answers[qi] === q.answer;
+    const row = document.createElement('div');
+    row.className = `review-item ${ok ? 'ok' : 'bad'}`;
+    const line1 = document.createElement('div');
+    line1.className = 'review-q';
+    line1.textContent = `${ok ? '✅' : '❌'} ${qi + 1}. ${q.question}`;
+    row.appendChild(line1);
+    if (!ok) {
+      const line2 = document.createElement('div');
+      line2.className = 'review-a';
+      line2.textContent =
+        `正确答案：${'ABCD'[q.answer]}. ${q.options[q.answer]}` +
+        (q.explanation ? `　—　${q.explanation}` : '');
+      row.appendChild(line2);
+    }
+    review.appendChild(row);
+  });
+  box.appendChild(review);
+
+  const routeTitle = document.createElement('div');
+  routeTitle.className = 'assess-head';
+  routeTitle.textContent = '🗺️ 你的学习路线';
+  box.appendChild(routeTitle);
+
+  const route = result.route || [];
+  if (!route.length) {
+    const p = document.createElement('p');
+    p.className = 'assess-summary';
+    p.textContent = '路线规划这次没有生成成功，你可以直接点「＋ 新的学习」挑一种方法开始，摸底结果同样作数～';
+    box.appendChild(p);
+  }
+  route.forEach((phase, pi) => {
+    const m = findMethod(phase.method);
+    const card = document.createElement('div');
+    card.className = 'route-phase';
+
+    const t = document.createElement('div');
+    t.className = 'route-title';
+    t.textContent = `第 ${pi + 1} 阶段 · ${m ? `${m.emoji} ${m.name}` : phase.method}`;
+    card.appendChild(t);
+
+    if (phase.goal) {
+      const g = document.createElement('div');
+      g.className = 'route-goal';
+      g.textContent = phase.goal;
+      card.appendChild(g);
+    }
+    if (phase.points && phase.points.length) {
+      const pts = document.createElement('div');
+      pts.className = 'route-points';
+      pts.textContent = `聚焦：${phase.points.join('、')}`;
+      card.appendChild(pts);
+    }
+    if (phase.milestone) {
+      const ms = document.createElement('div');
+      ms.className = 'route-milestone';
+      ms.textContent = `🏁 达标即切换：${phase.milestone}`;
+      card.appendChild(ms);
+    }
+
+    const btn = document.createElement('button');
+    btn.className = pi === 0 ? 'primary-btn' : 'mini-btn';
+    btn.type = 'button';
+    btn.textContent = pi === 0 ? `🚀 用${m ? m.name : '该方法'}开始学习` : `从第 ${pi + 1} 阶段开始`;
+    btn.addEventListener('click', () => startFromRoute(phase, pi));
+    card.appendChild(btn);
+    box.appendChild(card);
+  });
+
+  const closeRow = document.createElement('div');
+  closeRow.className = 'modal-actions';
+  const sp = document.createElement('span');
+  sp.className = 'sp';
+  closeRow.appendChild(sp);
+  const done = document.createElement('button');
+  done.className = 'mini-btn';
+  done.type = 'button';
+  done.textContent = '完成';
+  done.addEventListener('click', closeAssessModal);
+  closeRow.appendChild(done);
+  box.appendChild(closeRow);
+  els.assessModal.scrollTop = 0;
+}
+
+/* 从路线阶段开始学习：按该阶段方法建会话，主题作为第一条消息发出 */
+async function startFromRoute(phase, phaseIndex) {
+  const m = findMethod(phase.method);
+  const topic = (state.assess && state.assess.topic) || '';
+  closeAssessModal();
+  const session = await createSession(phase.method);
+  if (!session) return;
+  toast(m ? `已按路线从第 ${phaseIndex + 1} 阶段出发：「${m.name}」` : '新学习已创建', 'success');
+  if (topic) {
+    renderMessage('user', topic);
+    streamChat(topic);
+  }
 }
 
 /* ---------- 立绘表情 ---------- */
@@ -208,21 +674,25 @@ function setEmotion(emotion) {
 }
 
 /* ---------- 立绘互动（生命力） ---------- */
-const QUIPS = [
-  '嘿嘿，小诘被你点到啦～',
+const DEFAULT_QUIPS = [
+  '嘿嘿，被你点到啦～',
   '学习累了？让眼睛休息一下吧！',
   '今天想学点什么呀？',
   '小提示：上传资料能让学习计划更贴合你哦！',
-  '有疑问尽管说，不过我更想反问你，哈哈',
   '偷偷告诉你：每天学一点，坚持最可怕！',
 ];
 
-/* 点击立绘：随机表情 + 弹跳 + 俏皮话气泡（+语音朗读） */
+/* 点击立绘：随机表情 + 弹跳 + 当前人物专属俏皮话气泡（+语音朗读） */
 function pokeCharacter() {
   const pool = EMOTIONS.filter((e) => e !== state.emotion);
   setEmotion(pool[Math.floor(Math.random() * pool.length)]);
-  const quip = QUIPS[Math.floor(Math.random() * QUIPS.length)];
+  const quips = (state.method && state.method.quips && state.method.quips.length)
+    ? state.method.quips : DEFAULT_QUIPS;
+  const quip = quips[Math.floor(Math.random() * quips.length)];
   showCharBubble(quip);
+  // 打断式播放：清掉积压的学习朗读队列，交互台词立即开口，
+  // 否则新台词排在队尾，听到的还是之前积压的内容
+  stopTts();
   speak(quip);
 }
 
@@ -231,7 +701,8 @@ function showCharBubble(text) {
   els.charBubble.textContent = text;
   els.charBubble.classList.add('show');
   clearTimeout(bubbleTimer);
-  bubbleTimer = setTimeout(() => els.charBubble.classList.remove('show'), 2600);
+  // 时长须覆盖"清队+合成+开播"的延迟（约1~2s），避免声音还没响气泡就消失
+  bubbleTimer = setTimeout(() => els.charBubble.classList.remove('show'), 4500);
 }
 
 /* 待机随机小动作：每 8~15 秒轻微摇摆一次 */
@@ -273,47 +744,18 @@ async function loadSettings() {
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     state.llmReady = !!data.configured;
-    state.skins = data.skins || [];
-    // 应用已保存的皮肤（三处形象统一在渲染时取 charAsset）
-    if (data.skin) {
-      state.skin = data.skin;
-      state.skinFiles = data.skin_files || state.skinFiles;
-      els.characterImg.src = charAsset(state.emotion);
-      preloadSkin();
-    }
     if (!data.configured) openSettings(true); // 首次使用 → 向导
   } catch (e) { /* 静默失败：聊天时还会兜底提示 */ }
 }
 
-/* 填充皮肤/音色下拉框（打开弹窗时刷新，便于热加皮肤后无需重启） */
-function fillAppearanceControls(data) {
-  els.setSkin.innerHTML = '';
-  (data.skins || []).forEach((s) => {
-    const opt = document.createElement('option');
-    opt.value = s.id;
-    opt.textContent = s.name;
-    els.setSkin.appendChild(opt);
-  });
-  els.setSkin.value = data.skin || 'default';
-  els.setVoice.innerHTML = '';
-  (data.voices || []).forEach((v) => {
-    const opt = document.createElement('option');
-    opt.value = v.id;
-    opt.textContent = v.name;
-    els.setVoice.appendChild(opt);
-  });
-  els.setVoice.value = data.voice || 'zh-CN-xiaoyiNeural';
-}
-
 function openSettings(wizard) {
   settingsWizard = wizard;
-  // 预填当前生效的 base_url / model / 皮肤 / 音色；Key 不回填，仅显示掩码状态
+  // 预填当前生效的 base_url / model；Key 不回填，仅显示掩码状态
   fetch('/api/settings').then((r) => r.json()).then((data) => {
     els.setBaseUrl.value = data.base_url || '';
     els.setModel.value = data.model || '';
     els.keyStatus.textContent = data.configured ? `已配置 ${data.api_key_masked}` : '未配置';
     els.clearKeyBtn.classList.toggle('hidden', !data.configured);
-    fillAppearanceControls(data);
   }).catch(() => {});
   els.settingsTitle.textContent = wizard ? '👋 欢迎使用思小诘' : '⚙️ 模型设置';
   els.wizardIntro.classList.toggle('hidden', !wizard);
@@ -400,14 +842,12 @@ async function testConnection() {
   }
 }
 
-/* 保存设置：Key 留空 = 保持不变；URL/模型留空 = 恢复默认；皮肤/音色留空 = 保持不变 */
+/* 保存设置：Key 留空 = 保持不变；URL/模型留空 = 恢复默认 */
 async function saveSettings() {
   const body = {
     api_key: els.setApiKey.value.trim(),
     base_url: els.setBaseUrl.value.trim(),
     model: els.setModel.value.trim(),
-    skin: els.setSkin.value,
-    voice: els.setVoice.value,
   };
   if (settingsWizard && !body.api_key && !state.llmReady) {
     showTestResult(false, '❌ 请先填写 API Key');
@@ -429,7 +869,6 @@ async function saveSettings() {
       els.setApiKey.focus();
       return;
     }
-    applySkin(body.skin); // 皮肤即时生效（音色在后端即时生效）
     closeSettings();
     toast(settingsWizard ? '配置完成，开始学习吧！' : '设置已保存', 'success');
   } catch (e) {
@@ -439,17 +878,20 @@ async function saveSettings() {
   }
 }
 
-/* 试听所选音色：临时音色直接合成播放，无需保存 */
-async function previewVoice() {
-  const voice = els.setVoice.value;
-  if (!voice) return;
-  els.previewVoiceBtn.disabled = true;
-  els.previewVoiceBtn.textContent = '试听中…';
+/* 试听学伴音色（方法选择卡片）：临时音色直接合成播放，无需保存 */
+async function previewMethodVoice(m, btn) {
+  if (!m || !m.voice) return;
+  btn.disabled = true;
+  btn.textContent = '试听中…';
   try {
     const res = await fetch('/api/tts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: '你好呀，我是思小诘，听听这个音色感觉怎么样？', voice }),
+      body: JSON.stringify({
+        text: `你好呀，我是${m.char_name}，听听我的声音感觉怎么样？`,
+        voice: m.voice,
+        method: m.id,
+      }),
     });
     if (!res.ok) throw new Error(res.status);
     const blob = await res.blob();
@@ -457,8 +899,8 @@ async function previewVoice() {
   } catch (e) {
     toast('试听失败：在线音色需要联网，请检查网络', 'error');
   } finally {
-    els.previewVoiceBtn.disabled = false;
-    els.previewVoiceBtn.textContent = '▶ 试听';
+    btn.disabled = false;
+    btn.textContent = '🔊 试听';
   }
 }
 
@@ -466,7 +908,7 @@ async function previewVoice() {
 function scrollToBottom() { els.messageList.scrollTop = els.messageList.scrollHeight; }
 
 function showWelcome() {
-  addSystemCard('👋 我是思小诘！点击右上角 🕘 的「新的学习」，或直接输入想学的主题开始吧～');
+  addSystemCard(`👋 我是${charName()}！点击右上角 🕘 的「新的学习」可挑学习方法和伙伴，或直接输入想学的主题开始；也可以先做 🧭 学前测评摸底，定制专属学习路线～`);
 }
 
 function addSystemCard(text) {
@@ -485,7 +927,7 @@ function renderMessage(role, content) {
     const av = document.createElement('img');
     av.className = 'avatar';
     av.src = charAsset('idle');
-    av.alt = '思小诘';
+    av.alt = charName();
     wrap.appendChild(av);
   }
   const bubble = document.createElement('div');
@@ -539,8 +981,8 @@ function showThinking() {
   const wrap = document.createElement('div');
   wrap.className = 'msg assistant';
   wrap.innerHTML = `
-    <img class="avatar" src="${charAsset('think')}" alt="思小诘">
-    <div class="bubble thinking-bubble"><span class="dots"><i></i><i></i><i></i></span>思小诘思考中…</div>`;
+    <img class="avatar" src="${charAsset('think')}" alt="${charName()}">
+    <div class="bubble thinking-bubble"><span class="dots"><i></i><i></i><i></i></span>${charName()}思考中…</div>`;
   els.messageList.appendChild(wrap);
   thinkingEl = wrap;
   scrollToBottom();
@@ -553,7 +995,9 @@ function setStreamingUI(on) {
   els.chatInput.disabled = on;
   els.sendBtn.disabled = on;
   els.uploadBtn.disabled = on;
-  els.chatInput.placeholder = on ? '思小诘思考中…' : '和思小诘聊聊你想学什么…（Enter 发送，Shift+Enter 换行）';
+  els.chatInput.placeholder = on
+    ? `${charName()}思考中…`
+    : `和${charName()}聊聊你想学什么…（Enter 发送，Shift+Enter 换行）`;
 }
 
 /* ---------- 历史会话 ---------- */
@@ -616,10 +1060,16 @@ function renderSessions(sessions) {
 }
 
 /* ---------- 会话生命周期 ---------- */
-async function createSession() {
-  if (state.streaming) { toast('请等待思小诘回复完成', 'error'); return null; }
+/* methodId：学习方法的 id（新建学习时由方法弹窗传入；自动建会话时用上次方法） */
+async function createSession(methodId) {
+  if (state.streaming) { toast(`请等待${charName()}回复完成`, 'error'); return null; }
+  const mid = methodId || lastMethodId();
   try {
-    const res = await fetch('/api/sessions', { method: 'POST' });
+    const res = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: mid }),
+    });
     if (!res.ok) throw new Error(res.status);
     const data = await res.json();
     resetChat();
@@ -630,6 +1080,9 @@ async function createSession() {
     state.messages = [];
     state.currentPointId = null;
     state.progress = 0;
+    localStorage.setItem('eduragtutor_method', mid); // 记住本次选择
+    await loadMethods();
+    applyCharacter(findMethod((data.session && data.session.method) || mid));
     applyPanels();
     updateTopic();
     updatePhaseLabel();
@@ -647,7 +1100,7 @@ async function createSession() {
 }
 
 async function loadSession(id) {
-  if (state.streaming) { toast('请等待思小诘回复完成', 'error'); return; }
+  if (state.streaming) { toast(`请等待${charName()}回复完成`, 'error'); return; }
   try {
     const res = await fetch(`/api/sessions/${id}`);
     if (!res.ok) throw new Error(res.status);
@@ -659,6 +1112,10 @@ async function loadSession(id) {
     state.messages = data.messages || [];
     state.currentPointId = null;
     state.progress = (data.session && data.session.progress) || 0;
+
+    // 人物随会话的学习方法切换
+    await loadMethods(true);
+    applyCharacter(findMethod((data.session && data.session.method) || 'socratic'));
 
     // 渲染全部历史消息
     removeThinking();
@@ -723,19 +1180,64 @@ async function onSend() {
   if (!content || state.streaming) return;
   // 未配置模型 API：引导用户先完成设置
   if (!state.llmReady) {
-    toast('请先配置大模型 API（右上角 ⚙️），思小诘才能思考哦', 'error');
+    toast(`请先配置大模型 API（右上角 ⚙️），${charName()}才能思考哦`, 'error');
     openSettings(true);
     return;
   }
-  // 无会话时先自动创建，第一条消息即学习主题
+  // 无会话时：这是用户第一次说出想学什么 —— 先给测评建议卡，不直接开课
   if (!state.session) {
-    const session = await createSession();
-    if (!session) return;
+    els.chatInput.value = '';
+    autoResizeInput();
+    showAssessSuggestion(content);
+    return;
   }
   els.chatInput.value = '';
   autoResizeInput();
   renderMessage('user', content);
   streamChat(content);
+}
+
+/* 首次说出想学什么：渲染测评建议卡（做测评 or 直接开课） */
+function showAssessSuggestion(topic) {
+  const card = document.createElement('div');
+  card.className = 'system-card assess-suggest';
+
+  const p = document.createElement('div');
+  p.className = 'suggest-text';
+  p.textContent =
+    `想学「${topic}」？建议先做一次 🧭 学前测评：约 10 道选择题摸个底，` +
+    '再为你定制「先用什么方法学、学到什么程度、再换什么方法巩固」的学习路线～';
+  card.appendChild(p);
+
+  const row = document.createElement('div');
+  row.className = 'suggest-actions';
+  const assessBtn = document.createElement('button');
+  assessBtn.className = 'primary-btn';
+  assessBtn.type = 'button';
+  assessBtn.textContent = '开始测评';
+  assessBtn.addEventListener('click', () => openAssessModal(topic));
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'mini-btn';
+  skipBtn.type = 'button';
+  skipBtn.textContent = '跳过，直接开始学习';
+  skipBtn.addEventListener('click', async () => {
+    assessBtn.disabled = true;
+    skipBtn.disabled = true;
+    const session = await createSession(lastMethodId());
+    if (session) {
+      renderMessage('user', topic);
+      streamChat(topic);
+    } else {
+      assessBtn.disabled = false;
+      skipBtn.disabled = false;
+    }
+  });
+  row.appendChild(assessBtn);
+  row.appendChild(skipBtn);
+  card.appendChild(row);
+
+  els.messageList.appendChild(card);
+  scrollToBottom();
 }
 
 async function streamChat(content) {
@@ -977,7 +1479,7 @@ function renderMaterials() {
 /* ---------- 资料上传 ---------- */
 async function uploadMaterial(file) {
   if (!state.session) { toast('请先点击「新的学习」创建会话', 'error'); return; }
-  if (state.streaming) { toast('请等待思小诘回复完成', 'error'); return; }
+  if (state.streaming) { toast(`请等待${charName()}回复完成`, 'error'); return; }
 
   const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
   if (!['.txt', '.md', '.pdf', '.docx'].includes(ext)) {
@@ -1022,6 +1524,135 @@ async function uploadMaterial(file) {
   }
 }
 
+/* ---------- 联网找资料 ---------- */
+function openSearchModal() {
+  els.searchModal.classList.remove('hidden');
+  els.searchInput.focus();
+}
+
+function closeSearchModal() {
+  els.searchModal.classList.add('hidden');
+}
+
+async function performSearch() {
+  const q = els.searchInput.value.trim();
+  if (!q) { toast('先输入想找的资料关键词', 'error'); return; }
+  if (state.searching) return;
+  state.searching = true;
+  state.searchQuery = q;
+  els.searchGoBtn.disabled = true;
+  els.searchResults.innerHTML = '<div class="search-empty">🔍 搜索中…</div>';
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}&type=${state.searchType}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    renderSearchResults(data.results || []);
+  } catch (e) {
+    els.searchResults.innerHTML = '';
+    els.searchStatus.textContent = '搜索失败，请稍后再试～';
+    toast(`搜索失败：${e.message}`, 'error');
+  } finally {
+    state.searching = false;
+    els.searchGoBtn.disabled = false;
+  }
+}
+
+function renderSearchResults(list) {
+  els.searchResults.innerHTML = '';
+  if (!list.length) {
+    els.searchStatus.textContent = '没有找到相关资料，换个关键词或类型试试～';
+    return;
+  }
+  els.searchStatus.textContent = `找到 ${list.length} 条结果，文档类可直接下载入库`;
+  list.forEach((r) => {
+    const item = document.createElement('div');
+    item.className = 'search-result';
+
+    const head = document.createElement('div');
+    head.className = 'sr-head';
+    const title = document.createElement('a');
+    title.className = 'sr-title';
+    title.textContent = r.title;
+    title.title = r.title;
+    title.addEventListener('click', (ev) => { ev.preventDefault(); openExternal(r.url); });
+    const host = document.createElement('span');
+    host.className = 'sr-host';
+    host.textContent = r.host;
+    head.appendChild(title);
+    head.appendChild(host);
+
+    const snip = document.createElement('p');
+    snip.className = 'sr-snip';
+    snip.textContent = r.snippet || '（无摘要）';
+
+    const actions = document.createElement('div');
+    actions.className = 'sr-actions';
+    const dlBtn = document.createElement('button');
+    dlBtn.className = 'mini-btn';
+    dlBtn.type = 'button';
+    dlBtn.textContent = '📥 下载入库';
+    dlBtn.addEventListener('click', () => downloadFromWeb(r.url, dlBtn));
+    const openBtn = document.createElement('button');
+    openBtn.className = 'mini-btn';
+    openBtn.type = 'button';
+    openBtn.textContent = '🔗 浏览器打开';
+    openBtn.addEventListener('click', () => openExternal(r.url));
+    actions.appendChild(dlBtn);
+    actions.appendChild(openBtn);
+
+    item.appendChild(head);
+    item.appendChild(snip);
+    item.appendChild(actions);
+    els.searchResults.appendChild(item);
+  });
+}
+
+/* 下载到资料库：复用上传成功后的刷新逻辑（列表 + 学习计划） */
+async function downloadFromWeb(url, btn) {
+  if (!state.session) { toast('请先点击「新的学习」创建会话', 'error'); return; }
+  if (state.downloadingUrl) { toast('已有资料在下载中，请稍候', 'error'); return; }
+  state.downloadingUrl = url;
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '下载中…';
+  try {
+    const res = await fetch('/api/materials/download', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, session_id: state.session.id }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+    state.materials.push(data.material);
+    renderMaterials();
+    if (Array.isArray(data.points)) {
+      state.points = data.points;
+      renderPoints();
+    }
+    toast(data.replanned ? '资料已入库，学习计划已更新' : '资料已下载入库', 'success');
+  } catch (e) {
+    toast(`下载失败：${e.message}`, 'error');
+  } finally {
+    state.downloadingUrl = null;
+    btn.disabled = false;
+    btn.textContent = oldText;
+  }
+}
+
+/* 用系统默认浏览器打开链接 */
+async function openExternal(url) {
+  try {
+    const res = await fetch('/api/open_url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  } catch (e) {
+    toast('无法在浏览器中打开该链接', 'error');
+  }
+}
+
 /* ---------- 语音合成（TTS，排队依次播放） ---------- */
 const ttsQueue = [];
 let ttsBusy = false;
@@ -1043,7 +1674,12 @@ async function pumpTts() {
       const res = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        // 音色由学伴决定（voice.txt 可覆盖）；method 让后端优先用该学伴的离线语音包
+        body: JSON.stringify({
+          text,
+          voice: (state.method && state.method.voice) || '',
+          method: (state.method && state.method.id) || '',
+        }),
       });
       if (!res.ok) continue; // 503 等失败静默跳过
       const blob = await res.blob();
@@ -1067,6 +1703,9 @@ function playAudio(blob) {
     };
     audio.onended = clean;
     audio.onerror = clean;
+    // pause 也要收尾：stopTts 打断时 pause 不触发 ended，
+    // 缺这个会让 await playAudio 永远挂起、ttsBusy 卡死、后续语音全部静默
+    audio.onpause = clean;
     audio.play().catch(clean);
   });
 }

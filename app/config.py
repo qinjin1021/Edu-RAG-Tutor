@@ -1,7 +1,7 @@
 """全局配置：通过 pydantic-settings 从 .env / 环境变量读取。
 
 打包（PyInstaller frozen）模式下的差异：
-- 数据目录（数据库/向量库/音频/上传）放到用户目录 %APPDATA%/SiXiaoJie/data，
+- 数据目录（数据库/向量库/音频/上传）放到用户目录 %APPDATA%/EduRAGTutor/data，
   安装目录（Program Files）只读不可写；
 - Embedding 模型从打包内置的 models/ 目录加载，不再联网下载。
 """
@@ -77,7 +77,7 @@ def _resolve_data_dir() -> Path:
         # 环境变量优先（Windows 常规路径），兼容非标准环境
         env_appdata = os.environ.get("APPDATA")
         appdata = Path(env_appdata) if env_appdata else Path.home() / "AppData" / "Roaming"
-        return appdata / "SiXiaoJie" / "data"
+        return appdata / "EduRAGTutor" / "data"
     return PROJECT_ROOT / get_settings().data_dir
 
 

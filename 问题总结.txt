@@ -1,5 +1,5 @@
 ================================================================
-思小诘 · 苏格拉底学习助手
+Edu-RAG-Tutor
 项目生成与测试问题总结（含解决方法）
 整理日期：2026-09-05
 ================================================================
@@ -49,7 +49,7 @@
   原因：chromadb 的 Rust API、SqliteDB、遥测(posthog)、Segment 管理器、
         执行器等组件全部通过 importlib 按配置字符串动态加载，
         静态分析无法发现。
-  解决：在 sixiaojie.spec 的 hiddenimports 中使用
+  解决：在 EduRAGTutor.spec 的 hiddenimports 中使用
         collect_submodules("chromadb") 收集 chromadb 全部子模块。
         同理补充：
         - collect_submodules("sentence_transformers")
@@ -90,7 +90,7 @@
   原因：无控制台模式下 Python 层 stderr 为 None，且 PyInstaller
         引导层的错误对话框不经过 Python 层 stderr，异常信息直接丢失。
   解决：在 run.py（打包入口）最前面统一重定向：
-        - sys.stdout / sys.stderr → %APPDATA%\SiXiaoJie\sixiaojie.log
+        - sys.stdout / sys.stderr → %APPDATA%\EduRAGTutor\eduragtutor.log
           （追加模式、utf-8、行缓冲）
         - 重定向失败（如目录不可写）则回退到 os.devnull，
           无论如何保证流不为 None；
@@ -105,7 +105,7 @@
   解决：1) 按问题6补全 hiddenimports 后消失；
         2) 在 routes_material.py 的入库流程中增加
            logger.exception("资料入库失败: ...")，真实异常写入
-           %APPDATA%\SiXiaoJie\sixiaojie.log，便于用户反馈时排查。
+           %APPDATA%\EduRAGTutor\eduragtutor.log，便于用户反馈时排查。
 
 【问题11】测试时 SQLite 报：unable to open database file
   原因：本测试是在受限沙箱中执行的，SQLite 的 app.db-shm /
@@ -126,7 +126,7 @@
        读取的是修复前的旧源码，修复代码在构建过程中才落盘。
   结论：旧构建的 exe 混入了旧代码，源码本身没有问题。
   解决：用当前已确认完整的源码重新执行
-        PyInstaller sixiaojie.spec --noconfirm --clean
+        PyInstaller EduRAGTutor.spec --noconfirm --clean
         重新构建后一切正常。
   教训：
     - 构建期间不要修改源码，务必等构建完全结束后再动代码；
@@ -137,22 +137,22 @@
 ----------------------------------------------------------------
 四、最终验证结果（全部通过）
 ----------------------------------------------------------------
-  1. 窗口模式启动：秒级启动，窗口标题"思小诘 · 苏格拉底学习助手"
+  1. 窗口模式启动：秒级启动，窗口标题"Edu-RAG-Tutor"
   2. 健康检查：/api/health 约 2 秒返回 200
   3. 设置持久化：保存→读取生效→还原无损，API Key 全程保持
   4. 资料入库：文档解析 + 向量化成功（chunks=1，本地向量模型正常）
   5. LLM 连通性：成功请求 DeepSeek 接口并正确回传鉴权错误信息
      （测试时保存的是无效 Key，属预期行为）
-  6. 数据目录：自动创建于 %APPDATA%\SiXiaoJie\data\
+  6. 数据目录：自动创建于 %APPDATA%\EduRAGTutor\data\
      （app.db / chroma / uploads / audio）
 
 ----------------------------------------------------------------
 五、产物与使用说明
 ----------------------------------------------------------------
-  安装包（分发用）：installer\SiXiaoJie-Setup-1.0.0.exe（231 MB）
-  绿色版（直接运行）：dist\SiXiaoJie\SiXiaoJie.exe
+  安装包（分发用）：installer\EduRAGTutor-Setup-1.0.0.exe（231 MB）
+  绿色版（直接运行）：dist\EduRAGTutor\EduRAGTutor.exe
   一键打包脚本：build.bat（依赖 .venv + PyInstaller + Inno Setup 6）
-  运行日志：%APPDATA%\SiXiaoJie\sixiaojie.log（用户反馈问题时索取）
+  运行日志：%APPDATA%\EduRAGTutor\eduragtutor.log（用户反馈问题时索取）
 
   分发流程：对方安装后首次启动 → 首启向导输入自己的 API Key →
   保存后即可使用；之后可随时在设置中更换模型 / 接口地址 / Key。
@@ -168,7 +168,7 @@
      hiddenimports。
   3. 打包产物必须"实测"：启动、健康检查、核心功能各走一遍；
      报错行号与源码对不上时，优先怀疑"产物是旧代码"。
-  4. 日志先行：把"异常落盘"做进产品（sixiaojie.log +
+  4. 日志先行：把"异常落盘"做进产品（eduragtutor.log +
      startup_debug.txt），用户侧的疑难杂症才有据可查。
   5. 静态资源带版本参数（?v=N）是前端缓存问题的标准解法。
 
@@ -216,6 +216,37 @@
   原因：.avatar 38×38 + object-fit:cover，竖长立绘被按宽度
         放大后默认从中间裁剪，头部被裁掉。
   解决：加 object-position: top center，从顶部裁剪保留头部。
+
+【问题18】测评选择题选项排版错乱：单选圆圈占满整行，选项文字被挤到最右侧
+  现象：答题弹窗里每个选项的圆圈独占一行居中，"A. 2num" 等
+        文字被顶到右边换行，视觉上"左对齐的点占的地方太大"。
+  原因：弹窗通用样式 .modal input { width: 100% }（服务于设置
+        弹窗的文本输入框）把 <input type="radio"> 也撑成了
+        整行宽，flex 布局里圆圈把文字挤到行尾。
+  解决：.quiz-opt input 加 width: auto + flex-shrink: 0
+        覆盖通用规则，让单选框只占自身大小、紧贴选项文字；
+        并升级 CSS 版本号强制刷新缓存。
+  教训：弹窗级 "input 通配 100% 宽" 的样式会误伤 radio/checkbox，
+        新增含控件的弹窗区块时要针对性回收 width。
+
+【问题19】★学前测评出题报"出题失败，请检查大模型配置重试"（503）
+  现象：配置了 API Key 的用户点"开始出题"直接失败；
+        后端日志有 "LLM 返回内容无法解析为 JSON"。
+  原因：用户的模型 deepseek-v4-flash 是推理模型——回复前先思考，
+        reasoning_tokens（实测 2577）计入 max_tokens 上限；
+        出题原设 max_tokens=3500 被思考吃掉大半，10 道题的
+        JSON 正文写到一半被截断（finish_reason=length），
+        整体 json.loads 失败 → 出题抛错返回 503。
+  解决：双保险。① 提高 token 上限：出题 3500→8000、
+        路线规划 2000→4000，给思考留余量；
+        ② 新增"截断救捞"：llm.py 增加 chat_json_with_raw
+        （解析失败时把原文带回），assessment.py 的
+        _salvage_objects 按 '{"question"' / '{"method"' 标记
+        定位每个对象起点，用 json.JSONDecoder.raw_decode
+        逐个抠出完整的题目/阶段对象——就算 JSON 尾巴断了，
+        完整的前几题照样凑成试卷（下限 6 题）。
+  教训：推理模型的 max_tokens 必须给足思考余量；要求 LLM 输出
+        长 JSON 时不能只依赖整体解析，必须配截断救捞兜底。
 
 ================================================================
 （完）

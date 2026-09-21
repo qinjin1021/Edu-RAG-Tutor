@@ -1,4 +1,4 @@
-"""苏格拉底教学引擎：制定学习计划、驱动学习/复习/总结的完整状态机。
+"""学习教学引擎：按学习方法制定计划、驱动学习/复习/总结的完整状态机。
 
 handle_chat() 是一个生成器，产出门事件字典序列（SSE 契约）：
   {"type":"delta","text":...}   流式文本增量（已过滤评估块）
@@ -17,13 +17,14 @@ from app.config import get_settings
 from app.db import models as db
 from app.kb.retrieve import retrieve
 from app.tutor.llm import chat_json, chat_once, chat_stream
+from app.tutor.methods import MethodSpec, get_method
 from app.tutor.prompts import (
-    OPENING_SYSTEM,
-    PLAN_SYSTEM,
-    REVIEW_SYSTEM,
-    STAGE_REWARD_SYSTEM,
-    SUMMARY_SYSTEM,
-    TUTOR_SYSTEM,
+    build_opening_system,
+    build_plan_system,
+    build_review_system,
+    build_stage_reward_system,
+    build_summary_system,
+    build_tutor_system,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,13 +181,17 @@ def _enter_review(sid: int) -> None:
     db.update_session(sid, status="review")
 
 
-def _make_summary(sid: int, topic: str) -> str:
+def _make_summary(sid: int, topic: str, spec: MethodSpec) -> str:
     """用全部历史生成学习总结（保证以"学习总结"开头）。"""
     history = [
         {"role": m["role"], "content": m["content"]} for m in db.list_messages(sid)
     ]
     text = chat_once(
-        [{"role": "system", "content": SUMMARY_SYSTEM}, *history], temperature=0.3
+        [
+            {"role": "system", "content": build_summary_system(spec)},
+            *history,
+        ],
+        temperature=0.3,
     )
     text = (text or "").strip()
     if MARKER in text:
@@ -197,21 +202,23 @@ def _make_summary(sid: int, topic: str) -> str:
     return text
 
 
-def _make_stage_reward(sid: int, topic: str, point: dict) -> str:
+def _make_stage_reward(sid: int, topic: str, point: dict, spec: MethodSpec) -> str:
     """知识点首次达标：生成阶段奖励（鼓励 + 阶段小结/不足 + 巩固问题）。
 
     LLM 失败时回退到固定文案，保证巩固轮流程不中断。
     """
     history = db.list_messages(sid, 20)
     record = "\n".join(
-        f"{'用户' if m['role'] == 'user' else '思小诘'}：{m['content']}" for m in history
+        f"{'用户' if m['role'] == 'user' else spec.char_name}：{m['content']}"
+        for m in history
     )
     try:
         text = chat_once(
             [
                 {
                     "role": "system",
-                    "content": STAGE_REWARD_SYSTEM.format(
+                    "content": build_stage_reward_system(
+                        spec,
                         topic=topic,
                         point_name=point["name"],
                         point_desc=point.get("description") or point["name"],
@@ -233,8 +240,9 @@ def _make_stage_reward(sid: int, topic: str, point: dict) -> str:
     return (
         "🎉 阶段达成！\n"
         f"「{point['name']}」这个知识点你已经拿下啦，为认真学习的你鼓掌 👏\n"
-        "📋 阶段小结：这个阶段的要点你已经基本理解，不过真正的掌握还差一次巩固验收。\n"
-        f"🎯 巩固一下：请用自己的话讲讲「{point['name']}」最核心的一个要点吧？"
+        "📋 阶段小结：这个阶段的要点你已经基本理解，不过真正的掌握还差一次实战巩固。\n"
+        f"🎯 巩固练习：来一道真实场景题——假设你要在的实际项目里用到「{point['name']}」，"
+        "你会怎么应用它解决具体问题？说说你的思路。"
     )
 
 
@@ -251,8 +259,9 @@ def _state_event(sid: int, status: str) -> dict:
 
 # ---------- 对外接口 ----------
 
-def make_plan(sid: int, topic: str) -> list[dict]:
-    """为主题生成 3-8 个有序知识点并入库；失败回退单点计划。"""
+def make_plan(sid: int, topic: str, spec: Optional[MethodSpec] = None) -> list[dict]:
+    """按学习方法为主题生成 3-8 个有序知识点并入库；失败回退单点计划。"""
+    spec = spec or get_method("socratic")
     user_content = f"学习主题：{topic}"
     refs = retrieve(sid, topic)[:3]
     if refs:
@@ -260,7 +269,7 @@ def make_plan(sid: int, topic: str) -> list[dict]:
 
     data = chat_json(
         [
-            {"role": "system", "content": PLAN_SYSTEM},
+            {"role": "system", "content": build_plan_system(spec)},
             {"role": "user", "content": user_content},
         ],
         temperature=0.3,
@@ -286,12 +295,13 @@ def make_plan(sid: int, topic: str) -> list[dict]:
 
 
 def replan(sid: int) -> bool:
-    """资料上传后重建学习计划；无既有知识点时返回 False（等待首次规划）。"""
+    """资料上传后重建学习计划（沿用会话的学习方法）；无既有知识点时返回 False。"""
     session = db.get_session(sid)
     if session is None or not db.list_points(sid):
         return False
+    spec = get_method(session.get("method"))
     db.delete_points(sid)
-    make_plan(sid, session.get("topic") or "")
+    make_plan(sid, session.get("topic") or "", spec)
     if session["status"] != "planning":
         db.update_session(sid, status="learning")
     return True
@@ -309,12 +319,13 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
             return
 
         status = session["status"] or "planning"
+        spec = get_method(session.get("method"))
         is_opening = False
 
         # ---- 规划阶段：拆解知识点并生成开场白 ----
         if status == "planning" and not db.list_points(sid):
             topic = user_text.strip()[:80] or "综合学习"
-            make_plan(sid, topic)
+            make_plan(sid, topic, spec)
             db.update_session(sid, topic=topic, status="learning")
             session = db.get_session(sid)
             status = "learning"
@@ -328,15 +339,19 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
         current = _pick_point(sid, status)
         points = db.list_points(sid)
 
-        template = OPENING_SYSTEM if is_opening else (
-            REVIEW_SYSTEM if status in ("review", "done") else TUTOR_SYSTEM
-        )
-        system = template.format(
+        common = dict(
+            spec=spec,
             topic=topic,
             points=_fmt_points(points),
             current_point=_fmt_point(current),
             reference=_fmt_reference(sid, topic, current),
         )
+        if is_opening:
+            system = build_opening_system(**common)
+        elif status in ("review", "done"):
+            system = build_review_system(**common)
+        else:
+            system = build_tutor_system(**common)
 
         if is_opening:
             # 计划已生成，先推送一次状态（右栏立即显示知识点清单）
@@ -357,7 +372,7 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
         current_user_msg = history_msgs.pop(last_user_idx) if last_user_idx is not None else None
         if history_msgs:
             record = "\n".join(
-                f"{'用户' if m['role'] == 'user' else '思小诘'}：{m['content']}"
+                f"{'用户' if m['role'] == 'user' else spec.char_name}：{m['content']}"
                 for m in history_msgs
             )
             system = f"{system}\n\n【历史对话记录】\n{record}"
@@ -392,7 +407,7 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
 
         if action == "finish":
             _normalize_points(sid)
-            summary_text = _make_summary(sid, topic)
+            summary_text = _make_summary(sid, topic, spec)
             db.update_session(sid, status="done")
             status = "done"
         elif status == "learning":
@@ -404,14 +419,14 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
                 elif new_mastery is not None and new_mastery >= threshold:
                     # 首次达标 → 进入巩固轮：正反馈奖励（鼓励+阶段小结+巩固问题）
                     db.update_point(current["id"], status="consolidating")
-                    reward_text = _make_stage_reward(sid, topic, current)
+                    reward_text = _make_stage_reward(sid, topic, current, spec)
                 else:
                     # 未达标但跳点 → 待加强（沿用原逻辑，留给查漏补缺阶段）
                     db.update_point(current["id"], status="weak")
                 # 本知识点处理完毕；若没有下一个可学/可巩固知识点 → 收尾
                 if db.get_current_point(sid) is None:
                     if all(p["mastery"] >= threshold for p in db.list_points(sid)):
-                        summary_text = _make_summary(sid, topic)
+                        summary_text = _make_summary(sid, topic, spec)
                         db.update_session(sid, status="done")
                         status = "done"
                     else:
@@ -424,7 +439,7 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
                 elif current["status"] != "weak":
                     db.update_point(current["id"], status="weak")
             if all(p["mastery"] >= threshold for p in db.list_points(sid)):
-                summary_text = _make_summary(sid, topic)
+                summary_text = _make_summary(sid, topic, spec)
                 db.update_session(sid, status="done")
                 status = "done"
 
@@ -455,4 +470,8 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
         yield {"type": "done", "message_id": msg_id, "emotion": emotion}
     except Exception as exc:  # noqa: BLE001
         logger.exception("handle_chat 处理失败")
-        yield {"type": "error", "message": f"思小诘走神了，请稍后再试（{exc}）"}
+        try:
+            char_name = spec.char_name
+        except NameError:
+            char_name = "思小诘"
+        yield {"type": "error", "message": f"{char_name}走神了，请稍后再试（{exc}）"}

@@ -7,6 +7,9 @@ dist/
 installer/
 models/
 
+# 学伴离线语音包模型（单文件 >100MB 超 GitHub 限制，按语音包说明.txt 自行下载）
+static/assets/character/*/voice/
+
 # 开发期一次性调试脚本（不入库）
 _*.py
 probe.spec
