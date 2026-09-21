@@ -26,6 +26,7 @@
 - **🌐 联网找资料**：内置搜索可直接查找电子版学习资料（支持按 PDF / PPT / Word 筛选），文档类结果一键下载入库并自动向量化，网页类一键浏览器打开
 - **🎭 六位专属学伴形象**：每种学习方法对应专属 2D 角色，立绘可点击互动（随机表情 + 专属俏皮话 + 语音朗读，打断式即点即说），待机小动作、说话节奏动画；向对应目录放图即生效（兼容 PNG/JPG/GIF 动图，缺图自动回退）
 - **🔊 语音合成**：6 位学伴各有固定专属音色（选择卡片可 🔊 试听），也可放 `voice.txt` 自定义音色、放离线语音包（sherpa-onnx 模型）；合成优先级 `在线音色 → 系统语音 → 离线语音包`，详见 [语音包说明.txt](./static/assets/character/语音包说明.txt)
+- **🎤 语音输入**：输入栏左侧 🎤 点击说话，离线识别（sherpa-onnx SenseVoice，纯本地不上传）把文字填进输入框，动口不动手
 - **🎯 专注模式**：一键隐藏角色面板，专注对话学习
 - **🕘 历史会话**：学习进度本地持久化（SQLite），随时恢复上次学习
 - **⚙️ 界面可配置大模型**：支持任意 OpenAI 兼容 API（DeepSeek / 通义千问 / Kimi / 智谱 / 本地 Ollama…），安装版首启向导输入自己的 API Key 即可使用
@@ -38,7 +39,7 @@
 | 后端 | Python · FastAPI · uvicorn（单进程） |
 | 大模型 | OpenAI 兼容 API（SSE 流式输出） |
 | 向量检索 | chromadb · sentence-transformers（BAAI/bge-small-zh-v1.5） |
-| 语音 | edge-tts（在线）→ pyttsx3（系统兜底）→ sherpa-onnx（离线语音包） |
+| 语音 | 朗读：edge-tts（在线）→ pyttsx3（系统兜底）→ sherpa-onnx（离线语音包）· 输入：sherpa-onnx SenseVoice（离线识别） |
 | 存储 | SQLite（会话 / 消息 / 知识点 / 测评记录 / 偏好设置） |
 | 前端 | 原生 HTML/CSS/JS，无框架无构建 |
 

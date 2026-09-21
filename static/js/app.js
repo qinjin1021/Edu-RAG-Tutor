@@ -19,7 +19,7 @@ const els = {
   messageList: $('message-list'),
   chatInput: $('chat-input'),
   sendBtn: $('send-btn'),
-  uploadBtn: $('upload-btn'),
+  voiceInputBtn: $('voice-input-btn'),
   materialInput: $('material-input'),
   materialList: $('material-list'),
   progressHint: $('progress-hint'),
@@ -193,8 +193,8 @@ function bindEvents() {
     if (ev.target === els.settingsModal && !settingsWizard) closeSettings();
   });
 
-  // 输入栏 📎 与资料面板共用同一个文件选择器
-  els.uploadBtn.addEventListener('click', () => els.materialInput.click());
+  // 输入栏 🎤 语音输入；右侧资料面板 label 仍用同一个 materialInput 文件选择器
+  els.voiceInputBtn.addEventListener('click', toggleVoiceInput);
   els.materialInput.addEventListener('change', () => {
     const file = els.materialInput.files[0];
     els.materialInput.value = ''; // 清空以便重复选择同一文件
@@ -207,6 +207,147 @@ function autoResizeInput() {
   const t = els.chatInput;
   t.style.height = 'auto';
   t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+}
+
+/* ---------- 语音输入（🎤 离线识别：前端录音 → /api/asr → 填入输入框） ---------- */
+const voiceInput = {
+  state: 'idle',        // idle | recording | processing
+  stream: null,         // getUserMedia 媒体流
+  audioCtx: null,
+  processor: null,
+  sourceNode: null,
+  chunks: [],           // Float32Array 分片
+  sampleRate: 16000,
+  timeoutId: null,
+  MAX_MS: 60000,        // 单次录音上限
+};
+
+async function toggleVoiceInput() {
+  if (voiceInput.state === 'recording') { stopVoiceInput(); return; }
+  if (voiceInput.state !== 'idle' || state.streaming) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast('当前环境不支持麦克风录音，请用系统浏览器打开应用使用', 'error');
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: voiceInput.sampleRate, channelCount: 1, echoCancellation: true },
+    });
+  } catch (e) {
+    toast('无法访问麦克风：请检查系统/应用麦克风权限（安装版可改用浏览器模式）', 'error');
+    return;
+  }
+  voiceInput.state = 'recording';
+  voiceInput.stream = stream;
+  voiceInput.chunks = [];
+  voiceInput.audioCtx = new AudioContext({ sampleRate: voiceInput.sampleRate });
+  voiceInput.sourceNode = voiceInput.audioCtx.createMediaStreamSource(stream);
+  voiceInput.processor = voiceInput.audioCtx.createScriptProcessor(4096, 1, 1);
+  voiceInput.processor.onaudioprocess = (ev) => {
+    voiceInput.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+  };
+  voiceInput.sourceNode.connect(voiceInput.processor);
+  voiceInput.processor.connect(voiceInput.audioCtx.destination); // 驱动回调（不输出声音）
+  els.voiceInputBtn.classList.add('recording');
+  els.voiceInputBtn.title = '正在录音，点击结束';
+  els.chatInput.placeholder = '正在听你说话…说完点击 🎤 结束';
+  voiceInput.timeoutId = setTimeout(stopVoiceInput, voiceInput.MAX_MS); // 超长自动结束
+}
+
+function stopVoiceInput() {
+  if (voiceInput.state !== 'recording') return;
+  voiceInput.state = 'processing';
+  clearTimeout(voiceInput.timeoutId);
+  els.voiceInputBtn.classList.remove('recording');
+  els.voiceInputBtn.classList.add('processing');
+  els.voiceInputBtn.title = '识别中…';
+  els.chatInput.placeholder = '正在识别…';
+
+  try { voiceInput.processor && voiceInput.processor.disconnect(); } catch (e) { /* 忽略 */ }
+  try { voiceInput.sourceNode && voiceInput.sourceNode.disconnect(); } catch (e) { /* 忽略 */ }
+  voiceInput.stream && voiceInput.stream.getTracks().forEach((t) => t.stop());
+  const ctx = voiceInput.audioCtx;
+  const pcm = mergeChunks(voiceInput.chunks);
+  voiceInput.audioCtx = null; voiceInput.processor = null; voiceInput.sourceNode = null;
+  voiceInput.stream = null; voiceInput.chunks = [];
+
+  const finish = () => {
+    voiceInput.state = 'idle';
+    els.voiceInputBtn.classList.remove('processing');
+    els.voiceInputBtn.title = '语音输入：点击开始，说完再点一次结束';
+    updateInputPlaceholder();
+  };
+  if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {});
+  const total = pcm.length / voiceInput.sampleRate;
+  if (total < 0.5) { toast('说话时间太短了，再试一次吧', 'error'); finish(); return; }
+
+  const blob = encodeWav(pcm, voiceInput.sampleRate);
+  fetch('/api/asr', { method: 'POST', body: blob })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(asrErrText(data, res));
+      const text = (data.text || '').trim();
+      if (!text) { toast('没听清你说什么，再试一次吧', 'error'); return; }
+      els.chatInput.value = els.chatInput.value
+        ? `${els.chatInput.value.trimEnd()}${text}`
+        : text;
+      autoResizeInput();
+      els.chatInput.focus();
+    })
+    .catch((e) => {
+      const msg = String(e.message || '');
+      if (msg.includes('模型未配置')) toast('语音识别模型未配置：按 语音包说明.txt 下载后放入 models/asr/', 'error');
+      else toast(`语音识别失败：${msg}`, 'error');
+    })
+    .finally(finish);
+}
+
+/* 从 /api/asr 错误响应里取人话（detail 可能是字符串，也可能是校验错误数组） */
+function asrErrText(data, res) {
+  const d = data && data.detail;
+  if (typeof d === 'string' && d) return d;
+  if (Array.isArray(d)) {
+    const msgs = d.map((x) => (x && x.msg) || '').filter(Boolean).join('；');
+    if (msgs) return msgs;
+  }
+  return `HTTP ${res ? res.status : '?'}`;
+}
+
+/* 合并 Float32 分片 */
+function mergeChunks(chunks) {
+  let len = 0;
+  chunks.forEach((c) => { len += c.length; });
+  const out = new Float32Array(len);
+  let off = 0;
+  chunks.forEach((c) => { out.set(c, off); off += c.length; });
+  return out;
+}
+
+/* Float32 PCM → 16bit 单声道 WAV Blob（RIFF 头） */
+function encodeWav(samples, sampleRate) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const view = new DataView(buf);
+  const writeStr = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + samples.length * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);          // fmt 块大小
+  view.setUint16(20, 1, true);           // PCM
+  view.setUint16(22, 1, true);           // 单声道
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);  // 字节率
+  view.setUint16(32, 2, true);           // 块对齐
+  view.setUint16(34, 16, true);          // 位深
+  writeStr(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  let off = 44;
+  for (let i = 0; i < samples.length; i++, off += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+  }
+  return new Blob([view], { type: 'audio/wav' });
 }
 
 /* ---------- 语音开关 ---------- */

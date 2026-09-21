@@ -28,9 +28,13 @@ def collect_static():
     return out
 
 datas = collect_static()
-datas += [
-    ("models", "models"),   # 内置 bge-small-zh-v1.5 Embedding 模型（离线可用）
-]
+# models/：内置 bge-small-zh-v1.5 Embedding 模型（离线可用）；
+# asr/ 语音识别模型不打包（~230MB，按 语音包说明.txt 自行下载放入）
+for root, dirs, files in os.walk("models"):
+    dirs[:] = [d for d in dirs if d != "asr"]
+    for f in files:
+        src = os.path.join(root, f)
+        datas.append((src, os.path.dirname(src)))
 
 # pythonnet：pywebview 所需的 .NET 绑定（Python.Runtime.dll 等运行时组件）
 datas += collect_data_files("pythonnet")

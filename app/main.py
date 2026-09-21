@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import (
+    routes_asr,
     routes_assessment,
     routes_chat,
     routes_material,
@@ -51,6 +52,7 @@ app.include_router(routes_assessment.router)
 app.include_router(routes_material.router)
 app.include_router(routes_search.router)
 app.include_router(routes_misc.router)
+app.include_router(routes_asr.router)
 app.include_router(routes_settings.router)
 
 

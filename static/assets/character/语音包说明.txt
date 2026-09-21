@@ -90,3 +90,31 @@ sherpa-onnx 官方 TTS 模型发布页（免费、可离线）：
 edge-tts 在线音色（音质最佳，需联网）→ 系统本机语音 → 学伴离线语音包（最后兜底）：
 只有断网且系统语音也不可用时才会用到离线包；
 包损坏或未安装 sherpa-onnx 时跳过离线包，朗读不受影响。
+
+────────────────────────────────────────────────────────────────
+
+【语音输入（离线识别）—— 🎤 说的话变文字】
+
+输入栏左侧的 🎤 是语音输入按钮：点击开始说话，说完再点一次，
+识别出的文字会填进输入框（可修改后手动发送）。识别完全在本地进行，
+不联网、不上传任何音频。
+
+【模型下载（首次使用需一次，约 230MB）】
+sherpa-onnx 官方 ASR 模型发布页：
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models
+下载（中英混合识别，推荐）：
+  sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+GitHub 连不上时可用 HuggingFace 国内镜像分别下载这两个文件：
+  https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx
+  https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt
+
+【放置方法】
+在项目根目录（打包版为安装目录）下新建 models/asr/ 文件夹，
+把解压出来的这两个文件放进去：
+  model.int8.onnx
+  tokens.txt
+无需重启程序，放下即可使用；删除即回到"未配置"状态。
+
+【未配置模型时】
+点 🎤 录音后，应用会提示"语音识别模型未配置"。
+麦克风权限被系统/应用拒绝时也会提示，请到系统设置中允许。

@@ -683,3 +683,15 @@ body {
 .assess-suggest { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .suggest-text { font-size: 13px; line-height: 1.7; }
 .suggest-actions { display: flex; gap: 8px; }
+
+/* ===== 语音输入按钮（🎤 录音/识别态） ===== */
+#voice-input-btn { position: relative; }
+#voice-input-btn.recording {
+  color: #e5484d;
+  animation: micPulse 1.2s ease-in-out infinite;
+}
+#voice-input-btn.processing { opacity: 0.5; pointer-events: none; }
+@keyframes micPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}

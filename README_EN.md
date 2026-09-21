@@ -27,6 +27,7 @@ Planned walkthrough: placement assessment for a customized learning route (or pi
 - **🌐 Web Material Search** — search the web for study materials from within the app (filter by PDF / PPT / Word); document results can be downloaded into the knowledge base and auto-embedded, web pages open in your browser with one click
 - **🎭 Dedicated Companion Avatars** — each learning method has its own 2D character; click the character for reactions (random emotion + a per-companion playful line spoken aloud, interrupt-style playback), idle wiggle and talking animations; just drop images into the method's folder (PNG/JPG/GIF supported, missing images fall back automatically)
 - **🔊 Speech Synthesis** — each companion has a fixed signature voice (previewable on the selection card); you can also drop a `voice.txt` for a custom voice or an offline voice pack (sherpa-onnx model); priority: `online voice → system voice → offline pack`, see [语音包说明.txt](./static/assets/character/语音包说明.txt) (Chinese)
+- **🎤 Voice Input** — click 🎤 next to the input box, speak, and click again: offline recognition (sherpa-onnx SenseVoice, fully local — no audio ever leaves your machine) fills the transcript into the input box
 - **🎯 Focus Mode** — hide the character panel with one click and concentrate on the conversation
 - **🕘 Session History** — learning progress persisted locally (SQLite); resume any previous session anytime
 - **⚙️ Configure Your Own LLM** — works with any OpenAI-compatible API (DeepSeek / Qwen / Kimi / Zhipu / local Ollama…); the installer build walks first-run users through entering their own API key
@@ -39,7 +40,7 @@ Planned walkthrough: placement assessment for a customized learning route (or pi
 | Backend | Python · FastAPI · uvicorn (single process) |
 | LLM | OpenAI-compatible API (SSE streaming) |
 | Vector search | chromadb · sentence-transformers (BAAI/bge-small-zh-v1.5) |
-| Speech | edge-tts (online) → pyttsx3 (system fallback) → sherpa-onnx (offline voice packs) |
+| Speech | TTS: edge-tts (online) → pyttsx3 (system) → sherpa-onnx (offline packs) · ASR: sherpa-onnx SenseVoice (offline) |
 | Storage | SQLite (sessions / messages / points / assessments / preferences) |
 | Frontend | Vanilla HTML/CSS/JS, no framework, no build step |
 
