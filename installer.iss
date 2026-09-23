@@ -4,7 +4,7 @@
 
 #define MyAppName "Edu-RAG-Tutor"
 #define MyAppNameEn "EduRAGTutor"
-#define MyAppVersion "1.1.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "Edu-RAG-Tutor"
 #define MyAppExeName "EduRAGTutor.exe"
 #define MyAppDescription "AI 学习伙伴 · 六种学习方法"

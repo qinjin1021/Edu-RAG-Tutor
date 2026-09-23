@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Edu-RAG-Tutor</title>
-  <link rel="stylesheet" href="css/style.css?v=13" />
+  <link rel="stylesheet" href="css/style.css?v=14" />
 </head>
 <body>
 <div id="app">
@@ -38,6 +38,7 @@
         <span id="topic-text">开始你的学习吧</span>
       </div>
       <div class="header-btns">
+        <button id="wrongbook-btn" class="icon-btn" title="错题本：重练做错的题">📒</button>
         <button id="focus-btn" class="icon-btn" title="专注模式：隐藏左侧形象，专注学习">🎯</button>
         <button id="settings-btn" class="icon-btn" title="模型设置">⚙️</button>
         <button id="history-btn" class="icon-btn" title="历史学习：查看学习进度">🕘</button>
@@ -158,7 +159,7 @@
 <div id="assess-modal" class="modal-mask hidden">
   <div class="modal card assess-modal">
     <div class="history-head">
-      <h3 class="modal-title">🧭 学前测评</h3>
+      <h3 id="assess-title" class="modal-title">🧭 学前测评</h3>
       <button id="assess-close" class="mini-btn" type="button">关闭</button>
     </div>
 
@@ -213,6 +214,23 @@
   </div>
 </div>
 
-<script src="js/app.js?v=13"></script>
+<!-- 错题本弹窗：阶段自测与学前测评的错题收录于此，支持重练与标为已掌握 -->
+<div id="wrongbook-modal" class="modal-mask hidden">
+  <div class="modal card wrongbook-modal">
+    <div class="history-head">
+      <h3 class="modal-title">📒 错题本</h3>
+      <button id="wrongbook-close" class="mini-btn" type="button">关闭</button>
+    </div>
+    <div id="wrongbook-stats" class="wrongbook-stats"></div>
+    <div id="wrongbook-list" class="wrongbook-list"></div>
+    <div class="modal-actions">
+      <button id="wrongbook-exit-btn" class="link-btn hidden" type="button">退出重练</button>
+      <span class="sp"></span>
+      <button id="wrongbook-practice-btn" class="primary-btn" type="button">✏️ 错题重练</button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js?v=14"></script>
 </body>
 </html>

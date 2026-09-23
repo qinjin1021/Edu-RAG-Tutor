@@ -60,6 +60,36 @@ CREATE TABLE IF NOT EXISTS assessments (
     route TEXT DEFAULT '[]',
     created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS quizzes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    topic TEXT DEFAULT '',
+    questions TEXT DEFAULT '[]',
+    answers TEXT DEFAULT '[]',
+    score INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS wrong_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER,
+    quiz_id INTEGER,
+    source TEXT DEFAULT 'phase',
+    topic TEXT DEFAULT '',
+    method TEXT,
+    question TEXT NOT NULL,
+    options TEXT DEFAULT '[]',
+    answer INTEGER NOT NULL,
+    user_answer INTEGER DEFAULT -1,
+    point TEXT DEFAULT '',
+    explanation TEXT DEFAULT '',
+    wrong_count INTEGER DEFAULT 1,
+    resolved INTEGER DEFAULT 0,
+    created_at TEXT,
+    last_wrong_at TEXT
+);
 """
 
 

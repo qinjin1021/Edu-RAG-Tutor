@@ -27,6 +27,7 @@ from app.api import (
     routes_chat,
     routes_material,
     routes_misc,
+    routes_quiz,
     routes_search,
     routes_session,
     routes_settings,
@@ -49,6 +50,7 @@ app = FastAPI(title="Edu-RAG-Tutor", lifespan=lifespan)
 app.include_router(routes_session.router)
 app.include_router(routes_chat.router)
 app.include_router(routes_assessment.router)
+app.include_router(routes_quiz.router)
 app.include_router(routes_material.router)
 app.include_router(routes_search.router)
 app.include_router(routes_misc.router)

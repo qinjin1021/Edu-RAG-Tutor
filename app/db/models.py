@@ -3,6 +3,8 @@
 每个函数内部独立获取连接并在 finally 中关闭。
 """
 
+import json
+
 from app.db.database import get_conn, now_str
 
 # update_session 允许修改的字段白名单（method 创建后原则上不可变，仅为防未来静默丢字段）
@@ -89,13 +91,16 @@ def touch_session(sid) -> None:
 
 
 def delete_session(sid) -> None:
-    """删除会话，并级联清理其消息、知识点与材料记录。"""
+    """删除会话，并级联清理其消息、知识点、材料与自测记录。
+    错题本（wrong_questions）保留：靠冗余的 topic/method/source 字段继续显示来源。
+    """
     conn = get_conn()
     try:
         conn.execute("DELETE FROM sessions WHERE id = ?", (sid,))
         conn.execute("DELETE FROM messages WHERE session_id = ?", (sid,))
         conn.execute("DELETE FROM knowledge_points WHERE session_id = ?", (sid,))
         conn.execute("DELETE FROM materials WHERE session_id = ?", (sid,))
+        conn.execute("DELETE FROM quizzes WHERE session_id = ?", (sid,))
         conn.commit()
     finally:
         conn.close()
@@ -315,6 +320,161 @@ def update_assessment_result(
             (answers, score, total, level, route, aid),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------- 阶段自测 ----------
+
+def create_quiz(session_id, topic: str, questions: str) -> int:
+    """新建阶段自测记录（questions 为含答案的题目 JSON 字符串），返回 id。"""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "INSERT INTO quizzes (session_id, topic, questions, created_at) VALUES (?, ?, ?, ?)",
+            (session_id, topic, questions, now_str()),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_quiz(qid) -> dict | None:
+    """按 id 查自测记录，不存在返回 None。"""
+    conn = get_conn()
+    try:
+        row = conn.execute("SELECT * FROM quizzes WHERE id = ?", (qid,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_quiz_result(qid, answers: str, score: int, total: int) -> None:
+    """写入自测判分结果。"""
+    conn = get_conn()
+    try:
+        conn.execute(
+            "UPDATE quizzes SET answers = ?, score = ?, total = ? WHERE id = ?",
+            (answers, score, total, qid),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------- 错题本 ----------
+
+def add_wrong_questions(session_id, quiz_id, source: str, topic: str, method, items: list[dict]) -> int:
+    """批量写入错题；同题干且未解决的错题只累加 wrong_count（防重复计数）。
+    items 每项需含：question/options/answer/user_answer/point/explanation。
+    返回新增条数。
+    """
+    conn = get_conn()
+    try:
+        ts = now_str()
+        added = 0
+        for it in items:
+            row = conn.execute(
+                "SELECT id FROM wrong_questions WHERE question = ? AND resolved = 0",
+                (it["question"],),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "UPDATE wrong_questions SET wrong_count = wrong_count + 1, "
+                    "user_answer = ?, last_wrong_at = ? WHERE id = ?",
+                    (it.get("user_answer", -1), ts, row["id"]),
+                )
+                continue
+            conn.execute(
+                "INSERT INTO wrong_questions (session_id, quiz_id, source, topic, method, "
+                "question, options, answer, user_answer, point, explanation, "
+                "wrong_count, resolved, created_at, last_wrong_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)",
+                (
+                    session_id, quiz_id, source, topic, method,
+                    it["question"], json.dumps(it["options"], ensure_ascii=False),
+                    it["answer"], it.get("user_answer", -1),
+                    it.get("point", ""), it.get("explanation", ""),
+                    ts, ts,
+                ),
+            )
+            added += 1
+        conn.commit()
+        return added
+    finally:
+        conn.close()
+
+
+def list_wrong_questions() -> list[dict]:
+    """列出全部错题（未解决优先、最近做错的在前），options 反序列化为列表。"""
+    conn = get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM wrong_questions ORDER BY resolved ASC, last_wrong_at DESC"
+        ).fetchall()
+        result = []
+        for r in rows:
+            w = dict(r)
+            try:
+                w["options"] = json.loads(w.get("options") or "[]")
+            except (ValueError, TypeError):
+                w["options"] = []
+            result.append(w)
+        return result
+    finally:
+        conn.close()
+
+
+def get_wrong_question(wid) -> dict | None:
+    """按 id 查错题，不存在返回 None。"""
+    conn = get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM wrong_questions WHERE id = ?", (wid,)
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def practice_submit(results: list[dict]) -> int:
+    """错题重练判分落库：results 每项含 id/ok/choice。
+    答对 → resolved=1；答错 → wrong_count+1、更新 user_answer 与 last_wrong_at。
+    返回答对（已标记掌握）条数。
+    """
+    conn = get_conn()
+    try:
+        ts = now_str()
+        resolved_count = 0
+        for r in results:
+            if r["ok"]:
+                conn.execute(
+                    "UPDATE wrong_questions SET resolved = 1, last_wrong_at = ? WHERE id = ?",
+                    (ts, r["id"]),
+                )
+                resolved_count += 1
+            else:
+                conn.execute(
+                    "UPDATE wrong_questions SET wrong_count = wrong_count + 1, "
+                    "user_answer = ?, last_wrong_at = ? WHERE id = ?",
+                    (r.get("choice", -1), ts, r["id"]),
+                )
+        conn.commit()
+        return resolved_count
+    finally:
+        conn.close()
+
+
+def set_resolved(wid) -> bool:
+    """手动标记错题为已掌握，成功返回 True（记录不存在返回 False）。"""
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "UPDATE wrong_questions SET resolved = 1 WHERE id = ?", (wid,)
+        )
+        conn.commit()
+        return cur.rowcount > 0
     finally:
         conn.close()
 

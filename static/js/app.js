@@ -72,6 +72,15 @@ const els = {
   assessRequizBtn: $('assess-requiz-btn'),
   assessSubmitBtn: $('assess-submit-btn'),
   assessStepResult: $('assess-step-result'),
+  assessTitle: $('assess-title'),
+  // 错题本弹窗
+  wrongbookBtn: $('wrongbook-btn'),
+  wrongbookModal: $('wrongbook-modal'),
+  wrongbookClose: $('wrongbook-close'),
+  wrongbookStats: $('wrongbook-stats'),
+  wrongbookList: $('wrongbook-list'),
+  wrongbookPracticeBtn: $('wrongbook-practice-btn'),
+  wrongbookExitBtn: $('wrongbook-exit-btn'),
 };
 
 /* ---------- 全局状态 ---------- */
@@ -96,8 +105,17 @@ const state = {
   downloadingUrl: null,
   // 专注模式：开启后隐藏左侧形象面板（本地持久化）
   focusOn: localStorage.getItem('eduragtutor_focus') === '1',
-  // 学前测评：当前测评流程 {id, topic, questions, answers}
+  // 学前测评 / 阶段自测：当前流程 {kind: 'assessment'|'phase', id, sessionId, topic, questions, answers}
   assess: null,
+  // 阶段自测：quizSuggested=已提醒过自测的 mastered 知识点 id 集合（防重复弹卡）
+  quizSuggested: new Set(),
+  // 错题本：items/stats=服务端数据，practiceMode=重练作答中，answers={错题id: 所选下标}
+  wrongbook: {
+    items: [],
+    stats: { total: 0, unresolved: 0, resolved: 0 },
+    practiceMode: false,
+    answers: {},
+  },
 };
 
 /* ---------- 初始化 ---------- */
@@ -162,6 +180,23 @@ function bindEvents() {
   });
   els.assessSubmitBtn.addEventListener('click', submitAssessment);
   els.assessRequizBtn.addEventListener('click', startAssessment);
+
+  // 错题本弹窗
+  els.wrongbookBtn.addEventListener('click', openWrongbook);
+  els.wrongbookClose.addEventListener('click', closeWrongbook);
+  els.wrongbookModal.addEventListener('click', (ev) => {
+    if (ev.target === els.wrongbookModal) closeWrongbook();
+  });
+  els.wrongbookPracticeBtn.addEventListener('click', () => {
+    if (state.wrongbook.practiceMode) submitPractice();
+    else startPractice();
+  });
+  els.wrongbookExitBtn.addEventListener('click', exitPracticeMode);
+  // 列表事件委托：「已掌握，移出待练」按钮
+  els.wrongbookList.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.wrong-resolve-btn');
+    if (btn) resolveWrong(Number(btn.dataset.id));
+  });
 
   // 联网找资料弹窗
   els.webSearchBtn.addEventListener('click', openSearchModal);
@@ -556,9 +591,10 @@ function renderAssessCard() {
   els.methodGrid.appendChild(card);
 }
 
-/* 打开测评弹窗（prefill=预填主题，如用户刚输入的话） */
+/* 打开测评弹窗（prefill=预填主题，如用户刚输入的话）；学前测评模式 */
 function openAssessModal(prefill = '') {
-  state.assess = null;
+  state.assess = { kind: 'assessment' };
+  els.assessTitle.textContent = '🧭 学前测评';
   els.assessStepSetup.classList.remove('hidden');
   els.assessStepQuiz.classList.add('hidden');
   els.assessStepResult.classList.add('hidden');
@@ -573,10 +609,11 @@ function closeAssessModal() {
   els.assessModal.classList.add('hidden');
 }
 
-/* 第一步 → 第二步：请求出题（「换一套题」也走这里） */
+/* 第一步 → 第二步：请求出题（「换一套题」与阶段自测也走这里） */
 async function startAssessment() {
-  const topic = els.assessTopic.value.trim();
-  if (!topic) { toast('请先填写想学的主题', 'error'); return; }
+  const isPhase = !!(state.assess && state.assess.kind === 'phase');
+  const topic = isPhase ? (state.assess.topic || '') : els.assessTopic.value.trim();
+  if (!isPhase && !topic) { toast('请先填写想学的主题', 'error'); return; }
   if (!state.llmReady) {
     toast('请先配置大模型 API（右上角 ⚙️）', 'error');
     closeAssessModal();
@@ -586,40 +623,58 @@ async function startAssessment() {
   els.assessStartBtn.disabled = true;
   els.assessStartBtn.textContent = '出题中…';
   els.assessRequizBtn.disabled = true;
+  if (isPhase) {
+    els.assessSubmitBtn.disabled = true;
+    els.assessSubmitBtn.textContent = '出题中…';
+  }
+  let loaded = false;
   try {
-    const res = await fetch('/api/assessment/quiz', {
+    const res = await fetch(isPhase ? '/api/quiz' : '/api/assessment/quiz', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ topic }),
+      body: JSON.stringify(isPhase ? { session_id: state.assess.sessionId } : { topic }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || res.status);
-    state.assess = { id: data.id, topic, questions: data.questions || [], answers: [] };
+    state.assess = {
+      kind: isPhase ? 'phase' : 'assessment',
+      id: data.id,
+      sessionId: isPhase ? state.assess.sessionId : null,
+      topic: isPhase ? (data.topic || topic) : topic,
+      questions: data.questions || [],
+      answers: [],
+    };
     renderQuiz();
+    loaded = true;
   } catch (e) {
     toast(`出题失败：${e.message || '请稍后重试'}`, 'error');
+    if (isPhase) closeAssessModal();
   } finally {
     els.assessStartBtn.disabled = false;
     els.assessStartBtn.textContent = '开始出题 ✨';
     els.assessRequizBtn.disabled = false;
+    els.assessSubmitBtn.disabled = false; // 出题失败时还原交卷按钮；成功时由 renderQuiz 解禁、updateQuizProgress 管文案
+    if (!loaded) els.assessSubmitBtn.textContent = '交卷看结果';
   }
 }
 
-/* 渲染答题区（题目由易到难，单选） */
+/* 渲染答题区（题目由易到难，单选；阶段自测复用同一答题区） */
 function renderQuiz() {
   const qs = state.assess.questions;
+  const isPhase = state.assess.kind === 'phase';
   state.assess.answers = new Array(qs.length).fill(-1);
   els.assessStepSetup.classList.add('hidden');
   els.assessStepResult.classList.add('hidden');
   els.assessStepResult.innerHTML = '';
   els.assessStepQuiz.classList.remove('hidden');
-  els.assessQuizHint.textContent =
-    `主题「${state.assess.topic}」共 ${qs.length} 道单选题（由易到难）。凭现有理解作答即可，摸底只是分档，答错不影响开始学习～`;
+  els.assessQuizHint.textContent = isPhase
+    ? `主题「${state.assess.topic}」· 针对你已学过的知识点出了 ${qs.length} 道单选题。做错的题会自动收进错题本，随时可重练～`
+    : `主题「${state.assess.topic}」共 ${qs.length} 道单选题（由易到难）。凭现有理解作答即可，摸底只是分档，答错不影响开始学习～`;
+  els.assessRequizBtn.classList.toggle('hidden', isPhase); // 阶段自测无"换一套题"
   els.assessQuizList.innerHTML = '';
   qs.forEach((q, qi) => {
     const item = document.createElement('div');
     item.className = 'quiz-item';
-
     const title = document.createElement('div');
     title.className = 'quiz-q';
     const tag = document.createElement('span');
@@ -650,6 +705,7 @@ function renderQuiz() {
     item.appendChild(opts);
     els.assessQuizList.appendChild(item);
   });
+  els.assessSubmitBtn.disabled = false; // 出题成功：交卷按钮解除"出题中…"的禁用态
   updateQuizProgress();
   els.assessModal.scrollTop = 0;
 }
@@ -660,21 +716,30 @@ function updateQuizProgress() {
     done >= state.assess.questions.length ? '交卷看结果' : `已答 ${done}/${state.assess.questions.length}`;
 }
 
-/* 第二步 → 第三步：交卷 → 本地判分 + LLM 规划路线 */
+/* 第二步 → 第三步：交卷 → 本地判分（学前测评另规划路线；阶段自测错题入本） */
 async function submitAssessment() {
   const unanswered = state.assess.answers.filter((a) => a < 0).length;
   if (unanswered > 0) { toast(`还有 ${unanswered} 题没作答哦`, 'error'); return; }
+  const isPhase = state.assess.kind === 'phase';
   els.assessSubmitBtn.disabled = true;
-  els.assessSubmitBtn.textContent = '判分规划中…';
+  els.assessSubmitBtn.textContent = isPhase ? '判分中…' : '判分规划中…';
   try {
-    const res = await fetch('/api/assessment/submit', {
+    const res = await fetch(isPhase ? '/api/quiz/submit' : '/api/assessment/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assessment_id: state.assess.id, answers: state.assess.answers }),
+      body: JSON.stringify(
+        isPhase
+          ? { quiz_id: state.assess.id, answers: state.assess.answers }
+          : { assessment_id: state.assess.id, answers: state.assess.answers }
+      ),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.detail || res.status);
     renderAssessResult(data);
+    if (isPhase) {
+      const wrong = (data.total || 0) - (data.score || 0);
+      if (wrong > 0) toast(`${wrong} 道错题已收进错题本 📒`, 'success');
+    }
   } catch (e) {
     toast(`提交失败：${e.message || '请稍后重试'}`, 'error');
   } finally {
@@ -683,8 +748,9 @@ async function submitAssessment() {
   }
 }
 
-/* 渲染结果：得分 + 逐题复盘 + 多阶段学习路线 */
+/* 渲染结果：得分 + 逐题复盘（学前测评→多阶段学习路线；阶段自测→错题本提示） */
 function renderAssessResult(result) {
+  const isPhase = !!(state.assess && state.assess.kind === 'phase');
   els.assessStepQuiz.classList.add('hidden');
   const box = els.assessStepResult;
   box.innerHTML = '';
@@ -692,7 +758,9 @@ function renderAssessResult(result) {
 
   const head = document.createElement('div');
   head.className = 'assess-head';
-  head.textContent = `📊 摸底结果：${result.score}/${result.total} · ${result.level || ''}`;
+  head.textContent = isPhase
+    ? `📊 阶段自测：${result.score}/${result.total}`
+    : `📊 摸底结果：${result.score}/${result.total} · ${result.level || ''}`;
   box.appendChild(head);
 
   if (result.summary) {
@@ -724,55 +792,77 @@ function renderAssessResult(result) {
   });
   box.appendChild(review);
 
-  const routeTitle = document.createElement('div');
-  routeTitle.className = 'assess-head';
-  routeTitle.textContent = '🗺️ 你的学习路线';
-  box.appendChild(routeTitle);
-
-  const route = result.route || [];
-  if (!route.length) {
+  if (isPhase) {
+    // 阶段自测：错题去向提示 + 错题本入口（无路线规划）
+    const wrong = (result.total || 0) - (result.score || 0);
     const p = document.createElement('p');
     p.className = 'assess-summary';
-    p.textContent = '路线规划这次没有生成成功，你可以直接点「＋ 新的学习」挑一种方法开始，摸底结果同样作数～';
+    p.textContent = wrong > 0
+      ? `❌ ${wrong} 道做错的题已收进错题本，右上角 📒 随时可以重练，练到掌握为止～`
+      : '全对，太棒了！继续保持 ✨';
     box.appendChild(p);
+    if (wrong > 0) {
+      const actRow = document.createElement('div');
+      actRow.className = 'modal-actions';
+      const openBtn = document.createElement('button');
+      openBtn.className = 'mini-btn';
+      openBtn.type = 'button';
+      openBtn.textContent = '打开错题本 📒';
+      openBtn.addEventListener('click', () => { closeAssessModal(); openWrongbook(); });
+      actRow.appendChild(openBtn);
+      box.appendChild(actRow);
+    }
+  } else {
+    const routeTitle = document.createElement('div');
+    routeTitle.className = 'assess-head';
+    routeTitle.textContent = '🗺️ 你的学习路线';
+    box.appendChild(routeTitle);
+
+    const route = result.route || [];
+    if (!route.length) {
+      const p = document.createElement('p');
+      p.className = 'assess-summary';
+      p.textContent = '路线规划这次没有生成成功，你可以直接点「＋ 新的学习」挑一种方法开始，摸底结果同样作数～';
+      box.appendChild(p);
+    }
+    route.forEach((phase, pi) => {
+      const m = findMethod(phase.method);
+      const card = document.createElement('div');
+      card.className = 'route-phase';
+
+      const t = document.createElement('div');
+      t.className = 'route-title';
+      t.textContent = `第 ${pi + 1} 阶段 · ${m ? `${m.emoji} ${m.name}` : phase.method}`;
+      card.appendChild(t);
+
+      if (phase.goal) {
+        const g = document.createElement('div');
+        g.className = 'route-goal';
+        g.textContent = phase.goal;
+        card.appendChild(g);
+      }
+      if (phase.points && phase.points.length) {
+        const pts = document.createElement('div');
+        pts.className = 'route-points';
+        pts.textContent = `聚焦：${phase.points.join('、')}`;
+        card.appendChild(pts);
+      }
+      if (phase.milestone) {
+        const ms = document.createElement('div');
+        ms.className = 'route-milestone';
+        ms.textContent = `🏁 达标即切换：${phase.milestone}`;
+        card.appendChild(ms);
+      }
+
+      const btn = document.createElement('button');
+      btn.className = pi === 0 ? 'primary-btn' : 'mini-btn';
+      btn.type = 'button';
+      btn.textContent = pi === 0 ? `🚀 用${m ? m.name : '该方法'}开始学习` : `从第 ${pi + 1} 阶段开始`;
+      btn.addEventListener('click', () => startFromRoute(phase, pi));
+      card.appendChild(btn);
+      box.appendChild(card);
+    });
   }
-  route.forEach((phase, pi) => {
-    const m = findMethod(phase.method);
-    const card = document.createElement('div');
-    card.className = 'route-phase';
-
-    const t = document.createElement('div');
-    t.className = 'route-title';
-    t.textContent = `第 ${pi + 1} 阶段 · ${m ? `${m.emoji} ${m.name}` : phase.method}`;
-    card.appendChild(t);
-
-    if (phase.goal) {
-      const g = document.createElement('div');
-      g.className = 'route-goal';
-      g.textContent = phase.goal;
-      card.appendChild(g);
-    }
-    if (phase.points && phase.points.length) {
-      const pts = document.createElement('div');
-      pts.className = 'route-points';
-      pts.textContent = `聚焦：${phase.points.join('、')}`;
-      card.appendChild(pts);
-    }
-    if (phase.milestone) {
-      const ms = document.createElement('div');
-      ms.className = 'route-milestone';
-      ms.textContent = `🏁 达标即切换：${phase.milestone}`;
-      card.appendChild(ms);
-    }
-
-    const btn = document.createElement('button');
-    btn.className = pi === 0 ? 'primary-btn' : 'mini-btn';
-    btn.type = 'button';
-    btn.textContent = pi === 0 ? `🚀 用${m ? m.name : '该方法'}开始学习` : `从第 ${pi + 1} 阶段开始`;
-    btn.addEventListener('click', () => startFromRoute(phase, pi));
-    card.appendChild(btn);
-    box.appendChild(card);
-  });
 
   const closeRow = document.createElement('div');
   closeRow.className = 'modal-actions';
@@ -800,6 +890,302 @@ async function startFromRoute(phase, phaseIndex) {
   if (topic) {
     renderMessage('user', topic);
     streamChat(topic);
+  }
+}
+
+/* ---------- 阶段自测：建议卡（知识点新变为"已掌握"时提醒） ---------- */
+/* SSE state 事件后调用：diff 出新掌握的知识点，每点只提醒一次 */
+function checkPhaseQuiz(points) {
+  if (!state.session || !Array.isArray(points)) return;
+  const fresh = points.filter((p) => p.status === 'mastered' && !state.quizSuggested.has(p.id));
+  if (!fresh.length) return;
+  fresh.forEach((p) => state.quizSuggested.add(p.id));
+  showQuizSuggestion(fresh);
+}
+
+/* 在聊天流里插一张自测建议卡（一次回复完成多点时合并为一张卡） */
+function showQuizSuggestion(points) {
+  const card = document.createElement('div');
+  card.className = 'system-card assess-suggest';
+
+  const p = document.createElement('div');
+  p.className = 'suggest-text';
+  const names = points.map((x) => x.name).join('、');
+  p.textContent =
+    `🎉 恭喜拿下「${names}」！要不要来一场 📝 阶段自测？` +
+    '针对刚学的内容出几道小题检验一下，做错的题会自动收进错题本，随时可重练～';
+  card.appendChild(p);
+
+  const row = document.createElement('div');
+  row.className = 'suggest-actions';
+  const goBtn = document.createElement('button');
+  goBtn.className = 'primary-btn';
+  goBtn.type = 'button';
+  goBtn.textContent = '开始自测';
+  goBtn.addEventListener('click', openPhaseQuizModal);
+  const laterBtn = document.createElement('button');
+  laterBtn.className = 'mini-btn';
+  laterBtn.type = 'button';
+  laterBtn.textContent = '稍后再说';
+  laterBtn.addEventListener('click', () => card.remove());
+  row.appendChild(goBtn);
+  row.appendChild(laterBtn);
+  card.appendChild(row);
+
+  els.messageList.appendChild(card);
+  scrollToBottom();
+}
+
+/* 打开阶段自测弹窗：复用测评弹窗，跳过主题输入直接出题 */
+async function openPhaseQuizModal() {
+  if (!state.session) { toast('当前没有进行中的学习会话', 'error'); return; }
+  if (!state.llmReady) {
+    toast('请先配置大模型 API（右上角 ⚙️）', 'error');
+    openSettings(true);
+    return;
+  }
+  state.assess = { kind: 'phase', sessionId: state.session.id, topic: state.session.topic || '' };
+  els.assessTitle.textContent = '📝 阶段自测';
+  els.assessStepSetup.classList.add('hidden');
+  els.assessStepResult.classList.add('hidden');
+  els.assessStepResult.innerHTML = '';
+  els.assessQuizList.innerHTML = '';
+  els.assessStepQuiz.classList.remove('hidden');
+  els.assessQuizHint.textContent = '正在针对你已学过的知识点出题…';
+  els.assessModal.classList.remove('hidden');
+  await startAssessment();
+}
+
+/* ---------- 错题本 ---------- */
+async function openWrongbook() {
+  els.wrongbookModal.classList.remove('hidden');
+  els.wrongbookStats.textContent = '加载中…';
+  els.wrongbookPracticeBtn.disabled = true;
+  await fetchWrongbook();
+}
+
+function closeWrongbook() {
+  state.wrongbook.practiceMode = false;
+  state.wrongbook.answers = {};
+  els.wrongbookModal.classList.add('hidden');
+}
+
+async function fetchWrongbook() {
+  try {
+    const res = await fetch('/api/wrongbook');
+    if (!res.ok) throw new Error(res.status);
+    const data = await res.json();
+    state.wrongbook.items = data.items || [];
+    state.wrongbook.stats = data.stats || { total: 0, unresolved: 0, resolved: 0 };
+    state.wrongbook.practiceMode = false;
+    state.wrongbook.answers = {};
+    renderWrongbook();
+  } catch (e) {
+    toast('错题本加载失败，请稍后重试', 'error');
+  }
+}
+
+/* 渲染错题列表：普通模式（看题+标掌握）/ 重练模式（待掌握的题可作答） */
+function renderWrongbook() {
+  const wb = state.wrongbook;
+  const st = wb.stats || { total: 0, unresolved: 0, resolved: 0 };
+  els.wrongbookStats.textContent = `共 ${st.total} 题 · 🔴 待掌握 ${st.unresolved} · 🟢 已掌握 ${st.resolved}`;
+  els.wrongbookList.innerHTML = '';
+
+  if (!wb.items.length) {
+    const p = document.createElement('p');
+    p.className = 'panel-hint';
+    p.textContent = '暂无错题，继续保持！🎉';
+    els.wrongbookList.appendChild(p);
+  } else {
+    wb.items.forEach((w) => {
+      const item = document.createElement('div');
+      item.className = `wrong-item quiz-item${w.resolved ? ' is-resolved' : ''}`;
+
+      const title = document.createElement('div');
+      title.className = 'quiz-q';
+      const badge = document.createElement('span');
+      badge.className = `badge ${w.resolved ? 'mastered' : 'weak'}`;
+      badge.textContent = w.resolved ? '已掌握' : `待掌握 · 错${w.wrong_count || 1}次`;
+      title.appendChild(badge);
+      title.appendChild(document.createTextNode(w.question || ''));
+      item.appendChild(title);
+
+      const opts = document.createElement('div');
+      opts.className = 'wrong-opts';
+      if (wb.practiceMode && !w.resolved) {
+        // 重练模式：待掌握的题渲染为可作答单选
+        (w.options || []).forEach((opt, oi) => {
+          const label = document.createElement('label');
+          label.className = 'quiz-opt';
+          const input = document.createElement('input');
+          input.type = 'radio';
+          input.name = `wrong-${w.id}`;
+          input.addEventListener('change', () => {
+            wb.answers[w.id] = oi;
+            updatePracticeProgress();
+          });
+          label.appendChild(input);
+          const span = document.createElement('span');
+          span.textContent = `${'ABCD'[oi]}. ${opt}`;
+          label.appendChild(span);
+          opts.appendChild(label);
+        });
+      } else {
+        // 普通/反馈模式：静态展示选项，✔ 正确答案、✘ 你最近错选
+        (w.options || []).forEach((opt, oi) => {
+          const line = document.createElement('div');
+          const isAnswer = oi === w.answer;
+          const isUser = !isAnswer && oi === w.user_answer;
+          line.className = `wrong-opt${isAnswer ? ' is-answer' : ''}${isUser ? ' is-user' : ''}`;
+          line.textContent = `${isAnswer ? '✔ ' : isUser ? '✘ ' : ''}${'ABCD'[oi]}. ${opt}`;
+          opts.appendChild(line);
+        });
+      }
+      item.appendChild(opts);
+
+      // 重练反馈（本轮刚判分）
+      if (w.last_practice_ok !== undefined) {
+        const fb = document.createElement('div');
+        fb.className = 'wrong-feedback';
+        fb.textContent = w.last_practice_ok
+          ? '✅ 答对了，这题已自动标记为已掌握！'
+          : `❌ 又错了：正确答案是 ${'ABCD'[w.answer] || ''}.${(w.options || [])[w.answer] || ''}` +
+            (w.explanation ? `　—　${w.explanation}` : '');
+        fb.classList.add(w.last_practice_ok ? 'ok' : 'bad');
+        item.appendChild(fb);
+      }
+
+      // 来源行：类型 · 学伴 · 主题 · 考察点
+      const meta = document.createElement('div');
+      meta.className = 'wrong-meta';
+      const src = w.source === 'assessment' ? '学前测评' : '阶段自测';
+      const parts = [src];
+      if (w.method_label) parts.push(w.method_label);
+      if (w.topic) parts.push(`「${w.topic}」`);
+      if (w.point) parts.push(`考察：${w.point}`);
+      meta.textContent = parts.join(' · ');
+      item.appendChild(meta);
+
+      // 普通模式下未解决的题：手动标已掌握
+      if (!wb.practiceMode && !w.resolved) {
+        const btn = document.createElement('button');
+        btn.className = 'mini-btn wrong-resolve-btn';
+        btn.type = 'button';
+        btn.dataset.id = w.id;
+        btn.textContent = '已掌握，移出待练';
+        item.appendChild(btn);
+      }
+      els.wrongbookList.appendChild(item);
+    });
+  }
+
+  // 底部按钮状态
+  if (wb.practiceMode) {
+    els.wrongbookPracticeBtn.disabled = false;
+    els.wrongbookExitBtn.classList.remove('hidden');
+    updatePracticeProgress();
+  } else {
+    els.wrongbookPracticeBtn.textContent = '✏️ 错题重练';
+    els.wrongbookPracticeBtn.disabled = st.unresolved === 0;
+    els.wrongbookExitBtn.classList.add('hidden');
+  }
+}
+
+/* 重练模式：提交按钮文案随作答进度变化 */
+function updatePracticeProgress() {
+  if (!state.wrongbook.practiceMode) return;
+  const targets = state.wrongbook.items.filter((w) => !w.resolved);
+  const done = targets.filter((w) => state.wrongbook.answers[w.id] !== undefined).length;
+  els.wrongbookPracticeBtn.textContent =
+    done >= targets.length ? '交卷看结果' : `已答 ${done}/${targets.length}`;
+}
+
+/* 进入重练：清掉旧反馈，待掌握的题变可作答 */
+function startPractice() {
+  const wb = state.wrongbook;
+  const targets = wb.items.filter((w) => !w.resolved);
+  if (!targets.length) { toast('没有待重练的错题', 'info'); return; }
+  wb.items.forEach((w) => { delete w.last_practice_ok; });
+  wb.answers = {};
+  wb.practiceMode = true;
+  renderWrongbook();
+}
+
+/* 退出重练：回到普通列表（清作答与反馈） */
+function exitPracticeMode() {
+  const wb = state.wrongbook;
+  wb.practiceMode = false;
+  wb.answers = {};
+  wb.items.forEach((w) => { delete w.last_practice_ok; });
+  renderWrongbook();
+}
+
+/* 交卷：判分 + 答对自动已掌握 / 答错 wrong_count+1，本地同步状态并渲染反馈 */
+async function submitPractice() {
+  const wb = state.wrongbook;
+  const targets = wb.items.filter((w) => !w.resolved);
+  const answers = targets.map((w) => ({ id: w.id, choice: wb.answers[w.id] }));
+  const unanswered = answers.filter((a) => a.choice === undefined).length;
+  if (unanswered > 0) { toast(`还有 ${unanswered} 题没作答哦`, 'error'); return; }
+  els.wrongbookPracticeBtn.disabled = true;
+  els.wrongbookPracticeBtn.textContent = '判分中…';
+  try {
+    const res = await fetch('/api/wrongbook/practice', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answers }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.detail || res.status);
+    (data.results || []).forEach((r) => {
+      const w = wb.items.find((x) => x.id === r.id);
+      if (!w) return;
+      w.last_practice_ok = !!r.ok;
+      if (r.ok) w.resolved = 1;
+      else {
+        w.wrong_count = (w.wrong_count || 1) + 1;
+        w.user_answer = r.choice;
+      }
+    });
+    const resolvedCount = data.resolved_count || 0;
+    wb.stats.resolved = (wb.stats.resolved || 0) + resolvedCount;
+    wb.stats.unresolved = Math.max(0, (wb.stats.unresolved || 0) - resolvedCount);
+    wb.practiceMode = false;
+    wb.answers = {};
+    renderWrongbook();
+    toast(
+      resolvedCount > 0
+        ? `答对 ${resolvedCount} 题，已自动标记掌握 ✨`
+        : '这次还差一点，看看解析再来一次，你可以的！',
+      resolvedCount > 0 ? 'success' : 'info'
+    );
+  } catch (e) {
+    toast(`重练提交失败：${e.message || '请稍后重试'}`, 'error');
+    renderWrongbook(); // 回到重练模式（恢复按钮与作答状态）
+  }
+}
+
+/* 手动把错题标为已掌握 */
+async function resolveWrong(id) {
+  if (!id) return;
+  try {
+    const res = await fetch('/api/wrongbook/resolve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    if (!res.ok) throw new Error(res.status);
+    const wb = state.wrongbook;
+    const w = wb.items.find((x) => x.id === id);
+    if (w && !w.resolved) {
+      w.resolved = 1;
+      wb.stats.resolved = (wb.stats.resolved || 0) + 1;
+      wb.stats.unresolved = Math.max(0, (wb.stats.unresolved || 0) - 1);
+    }
+    renderWrongbook();
+  } catch (e) {
+    toast('操作失败，请稍后重试', 'error');
   }
 }
 
@@ -1217,6 +1603,7 @@ async function createSession(methodId) {
     state.session = data.session;
     state.phase = (data.session && data.session.status) || 'planning';
     state.points = [];
+    state.quizSuggested = new Set(); // 新会话：从头记录已提醒过自测的知识点
     state.materials = [];
     state.messages = [];
     state.currentPointId = null;
@@ -1249,6 +1636,10 @@ async function loadSession(id) {
     state.session = data.session;
     state.phase = (data.session && data.session.status) || 'planning';
     state.points = data.points || [];
+    // 恢复历史会话：已掌握的知识点不触发自测建议卡（只对"新完成"的点提醒）
+    state.quizSuggested = new Set(
+      (data.points || []).filter((p) => p.status === 'mastered').map((p) => p.id)
+    );
     state.materials = data.materials || [];
     state.messages = data.messages || [];
     state.currentPointId = null;
@@ -1303,6 +1694,7 @@ function resetAll() {
   state.session = null;
   state.phase = 'planning';
   state.points = [];
+  state.quizSuggested = new Set();
   state.materials = [];
   state.messages = [];
   state.currentPointId = null;
@@ -1496,7 +1888,10 @@ function applyState(ev) {
     }
     if (state.session) state.session.status = ev.phase;
   }
-  if (Array.isArray(ev.points)) state.points = ev.points;
+  if (Array.isArray(ev.points)) {
+    state.points = ev.points;
+    checkPhaseQuiz(ev.points); // 有知识点新变为"已掌握"→ 插阶段自测建议卡
+  }
   if (typeof ev.progress === 'number') {
     state.progress = ev.progress;
     if (state.session) state.session.progress = ev.progress;

@@ -38,7 +38,7 @@ _LEVELS = (
 )
 
 
-def _clean_questions(raw) -> list[dict]:
+def clean_questions(raw) -> list[dict]:
     """清洗 LLM 返回的题目列表：校验字段、answer 归一到 0-3、截到上限。"""
     questions: list[dict] = []
     if not isinstance(raw, list):
@@ -102,7 +102,7 @@ def _salvage_objects(raw: str, marker: str) -> list[dict]:
     return objects
 
 
-def _request_json(system: str, max_tokens: int, marker: str) -> tuple[dict | None, list[dict]]:
+def request_json(system: str, max_tokens: int, marker: str) -> tuple[dict | None, list[dict]]:
     """发一次 JSON 请求，返回 (整体解析结果, 截断救捞出的对象列表)。
 
     整体解析成功时救捞列表为空；失败时从原文按 marker 抠完整对象。
@@ -125,9 +125,9 @@ def create_quiz(topic: str) -> dict:
     出题失败（LLM 不可用/有效题量不足）抛 RuntimeError；
     JSON 被截断时按救捞出的完整题目继续，凑够下限即用。
     """
-    data, salvaged = _request_json(build_quiz_system(topic), QUIZ_MAX_TOKENS, '{"question"')
+    data, salvaged = request_json(build_quiz_system(topic), QUIZ_MAX_TOKENS, '{"question"')
     raw_questions = (data.get("questions") if isinstance(data, dict) else None) or salvaged
-    questions = _clean_questions(raw_questions)
+    questions = clean_questions(raw_questions)
     if len(questions) < MIN_QUESTIONS:
         logger.warning("学前测评出题数量不足：%s", len(questions))
         raise RuntimeError("quiz generation failed")
@@ -196,6 +196,10 @@ def submit_answers(assessment_id: int, answers: list[int]) -> dict:
     questions = json.loads(record["questions"] or "[]")
     topic = record["topic"] or ""
 
+    # 幂等门：已提交过的测评不重复入错题本
+    prev = (record["answers"] or "").strip()
+    already_submitted = bool(prev and prev != "[]")
+
     # 判分：缺答/越界一律算错，但不抛错
     norm = [(answers[i] if i < len(answers) else -1) for i in range(len(questions))]
     score = sum(1 for i, q in enumerate(questions) if norm[i] == q["answer"])
@@ -205,7 +209,7 @@ def submit_answers(assessment_id: int, answers: list[int]) -> dict:
     route: list[dict] = []
     summary = ""
     try:
-        data, salvaged = _request_json(
+        data, salvaged = request_json(
             build_route_system(topic, _methods_block(), _grade_report(topic, questions, norm, score)),
             ROUTE_MAX_TOKENS,
             '{"method"',
@@ -227,6 +231,27 @@ def submit_answers(assessment_id: int, answers: list[int]) -> dict:
         level,
         json.dumps(route, ensure_ascii=False),
     )
+
+    # 错题入本：学前测评做错的题收进错题本（session_id/method 为空，来源标 assessment）
+    if not already_submitted:
+        wrong_items = [
+            {
+                "question": q["question"],
+                "options": q["options"],
+                "answer": q["answer"],
+                "user_answer": norm[i],
+                "point": q.get("point", ""),
+                "explanation": q.get("explanation", ""),
+            }
+            for i, q in enumerate(questions)
+            if norm[i] != q["answer"]
+        ]
+        if wrong_items:
+            try:
+                db.add_wrong_questions(None, assessment_id, "assessment", topic, None, wrong_items)
+            except Exception as exc:  # noqa: BLE001 —— 入本是增值能力，失败不阻断判分返回
+                logger.warning("学前测评错题入本失败：%s", exc)
+
     return {
         "topic": topic,
         "total": len(questions),

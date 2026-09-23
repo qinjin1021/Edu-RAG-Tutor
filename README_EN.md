@@ -67,7 +67,7 @@ Planned walkthrough: placement assessment for a customized learning route (or pi
 
 ### Option 1: Download the Installer (Recommended)
 
-1. **Download**: [EduRAGTutor-Setup-1.1.0.exe](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/download/v1.1.0/EduRAGTutor-Setup-1.1.0.exe) (~350 MB)
+1. **Download**: [EduRAGTutor-Setup-1.2.0.exe](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/download/v1.2.0/EduRAGTutor-Setup-1.2.0.exe) (~350 MB)
    Or browse all versions on the [Releases page](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/latest)
 2. **Install**: double-click and follow the wizard (no admin rights required)
 3. **Configure**: on first launch, enter your own LLM API key (recommended: [DeepSeek](https://platform.deepseek.com) — register and create a key under "API Keys"; Qwen / Kimi / Zhipu / local Ollama and other OpenAI-compatible services also work)
@@ -109,7 +109,7 @@ build.bat
 
 Outputs:
 - `dist\EduRAGTutor\EduRAGTutor.exe` — portable build, runs directly
-- `installer\EduRAGTutor-Setup-1.1.0.exe` — distributable installer (users enter their own API key on first launch)
+- `installer\EduRAGTutor-Setup-1.2.0.exe` — distributable installer (users enter their own API key on first launch)
 
 ## ⚙️ Configuration (.env)
 
