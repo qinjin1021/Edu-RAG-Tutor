@@ -1,252 +1,78 @@
-================================================================
-Edu-RAG-Tutor
-项目生成与测试问题总结（含解决方法）
-整理日期：2026-09-05
-================================================================
+════════════════════════════════════════════════════════════════
+  Edu-RAG-Tutor 问题总结：应用内发消息"没反应"（v1.2.1 修复）
+════════════════════════════════════════════════════════════════
 
-本文件汇总了本项目在「功能开发 → PyInstaller 打包 → 打包产物测试 →
-安装包分发」全过程中遇到的所有典型问题、原因分析和解决方案，
-供后续维护与复盘参考。
+【问题现象】
+- 用户在应用窗口发送学习消息后"没有反应"：自己的气泡能显示，
+  但没有任何"思考中"提示、没有回复、没有报错弹窗。
+- 换模型（deepseek-v4-flash → deepseek-chat）无效。
+- 直接用 API/curl 调后端 /api/chat 一切正常，问题只出现在界面操作。
+- 时间线：v1.0（第一版）交互正常秒回；v1.1 起逐渐"没反应"，
+  v1.2.0 后用户感知为完全失效。
 
-----------------------------------------------------------------
-一、功能开发阶段（前端设置界面 / 后端动态配置）
-----------------------------------------------------------------
+────────────────────────────────────────────────────────────────
+【根因一（主凶）：前端悬空引用，所有应用内发送 100% 静默失败】
+────────────────────────────────────────────────────────────────
+- 位置：static/js/app.js → setStreamingUI() 函数。
+- 来源：commit 3a31512（v1.1 语音输入功能，麦克风按钮替换回形针
+  上传按钮）。该提交删除了：
+    - els 定义中的 uploadBtn: $('upload-btn')
+    - DOM 中的上传按钮元素
+  但漏删了 setStreamingUI() 里的一行：
+    els.uploadBtn.disabled = on;   // ← els.uploadBtn 已不存在
+- 崩溃链路：onSend() 先渲染用户气泡 → 调 streamChat() →
+  第一行 setStreamingUI(true) 抛 TypeError
+  （Cannot set properties of undefined (setting 'disabled')）。
+- 为什么毫无提示：
+  1) 抛异常位置在 streamChat 的 try 块【之外】，catch 接不住，
+     控制台才可见，界面无任何反馈；
+  2) state.streaming = true 在抛异常前一行已执行 →
+     后续每次点发送都被 onSend 入口守卫
+     （if (!content || state.streaming) return）静默拦截。
+- 结论：从 v1.1 起，应用内每条消息都在发请求前崩溃，
+  且第一次失败后整个窗口的发送功能永久瘫痪（直到刷新页面）。
 
-【问题1】启动报错：name 'routes_settings' is not defined
-  原因：新增的设置路由模块没有在应用入口注册。
-  解决：在 app/main.py 中正确导入 routes_settings，
-        并通过 app.include_router(routes_settings.router) 注册路由。
+────────────────────────────────────────────────────────────────
+【根因二（帮凶）：服务随窗口关闭而退出，造成"断联"假象】
+────────────────────────────────────────────────────────────────
+- app/main.py：webview 窗口关闭 → webview.start() 返回 →
+  os._exit(0) 强制退出整个进程（uvicorn 是守护线程随之死亡）。
+- 开发模式下误关黑色控制台窗口同样会杀死服务。
+- 服务退出后，页面若还开着，发消息会失败且错误 toast 一闪而过，
+  表现同样是"没反应"。排查过程中服务共意外退出 3 次，
+  混淆了对主凶的定位。
 
-【问题2】保存设置报错：'SettingsBody' object has no attribute 'clear_api_key'
-  原因：后端 Pydantic 请求模型缺少"清除 API Key"字段，而前端会提交该字段。
-  解决：在 app/api/routes_settings.py 的 SettingsBody 类中补充
-        clear_api_key: bool = False 字段，True 表示清除已保存的 Key。
+────────────────────────────────────────────────────────────────
+【修复内容】
+────────────────────────────────────────────────────────────────
+1. 删除 setStreamingUI() 中悬空的 els.uploadBtn.disabled = on;（核心修复）
+2. streamChat 的 catch 增强：toast 带具体错误信息，并在聊天区追加
+   持久化的错误系统卡片（此前 toast 一闪而过容易被忽略）；
+   静态资源版本号提升 js?v=17 强制刷新缓存。
+3. 启动脚本增加输出重定向到日志文件（%TEMP%\eduragtutor 运行日志），
+   便于后续排查。
+4. 版本号升级 1.2.0 → 1.2.1（installer.iss / build.bat / README）。
 
-【问题3】前端点击"清除已保存 Key"后，界面仍显示旧 Key
-  原因：清除操作只调用了后端接口，没有同步刷新本地 UI 状态。
-  解决：在前端 clearSavedKey 函数中成功回调里更新界面显示
-        （configured 状态、掩码文本等）。
+────────────────────────────────────────────────────────────────
+【排查方法记录（复盘用）】
+────────────────────────────────────────────────────────────────
+1. netstat 查端口 8760 监听 → /api/health 探活 → 排除服务死亡。
+2. curl 直接 POST /api/chat 实测 SSE 全链路 → 后端无责。
+3. 查会话消息时间戳：用户消息不在数据库 = 请求从未到达后端
+   → 锁定前端。
+4. 真浏览器复现（关键一步）：Enter 键触发 onSend 后气泡已渲染，
+   但 Network 面板无任何 POST /api/chat 请求 → 前端在发请求前崩了
+   → Console 抓到 TypeError at setStreamingUI。
+5. git log -S "els.uploadBtn.disabled" 定位引入提交。
+教训：前端静默吞错误（异常点在 try 外 + 入口守卫）会让"网络问题"
+"服务挂了""模型太慢"等假象掩盖真凶；关键路径的状态变更和报错
+必须在 UI 上可见。E2E 测试必须走真实界面，不能只测 API。
 
-【问题4】修改了 JS/CSS 但浏览器始终加载旧版本，改动"不生效"
-  原因：浏览器缓存了旧的静态资源文件。
-  解决：在 index.html 中引用 JS/CSS 时附加版本参数（如 app.js?v=5），
-        每次改动后升级版本号强制浏览器重新拉取。
-        注意：项目约定 JS/CSS 引用必须带版本参数。
-
-【问题5】控制台报错：Cannot read properties of undefined (reading 'addEventListener')
-  原因：JS 中给"清除 Key"按钮绑定事件时，元素映射表 els 里缺少
-        clearKeyBtn 的定义，取到 undefined。
-  解决：在 els 对象定义中补充 clearKeyBtn 元素引用。
-
-----------------------------------------------------------------
-二、PyInstaller 打包阶段（动态导入缺失系列）
-----------------------------------------------------------------
-
-打包的核心难点：很多第三方库内部使用 importlib 按"配置字符串"动态
-加载子模块，PyInstaller 的静态依赖分析发现不了它们，必须手动收集。
-
-【问题6】打包版启动崩溃：No module named 'chromadb.telemetry.product.posthog'
-  原因：chromadb 的 Rust API、SqliteDB、遥测(posthog)、Segment 管理器、
-        执行器等组件全部通过 importlib 按配置字符串动态加载，
-        静态分析无法发现。
-  解决：在 EduRAGTutor.spec 的 hiddenimports 中使用
-        collect_submodules("chromadb") 收集 chromadb 全部子模块。
-        同理补充：
-        - collect_submodules("sentence_transformers")
-          （该库按 modules.json 动态 import 模型子模块）
-        - collect_submodules("webview")
-          （pywebview 按平台动态 import 后端，Windows → EdgeChromium/WinForms）
-        - "chromadb_rust_bindings"（Rust 扩展，独立顶层包）
-        - pyttsx3.drivers / pyttsx3.drivers.sapi5（按系统加载语音驱动）
-        - uvicorn.loops.auto / protocols.http.auto / lifespan.on / lifespan.off
-          （uvicorn 按配置动态加载协议实现，做兜底）
-
-【问题7】打包体积过大（onnxruntime 约 400MB）
-  原因：onnxruntime 仅被 chromadb 默认 Embedding 函数使用，
-        而本项目显式传入向量，根本不会触发。
-  解决：在 spec 的 excludes 中排除 onnxruntime、tkinter、matplotlib、
-        IPython、jupyter 等不需要的库。
-
-----------------------------------------------------------------
-三、打包后运行阶段（窗口模式适配系列）
-----------------------------------------------------------------
-
-【问题8】启动即崩：AttributeError: 'NoneType' object has no attribute 'isatty'
-  Traceback 关键行：
-    uvicorn\logging.py, in __init__  → sys.stdout.isatty()
-    ValueError: Unable to configure formatter 'default'
-  原因：打包用了 console=False（无控制台窗口模式），此时
-        sys.stdout / sys.stderr 均为 None。uvicorn 的日志格式化器
-        初始化时会调用 sys.stdout.isatty() 判断是否启用彩色输出，
-        对 None 调用该方法直接抛 AttributeError，导致 uvicorn.Config
-        构造失败，应用启动崩溃。
-  解决（双保险）：
-    1) app/main.py：uvicorn.Config(..., use_colors=False)，
-       显式禁用彩色输出，绕开 isatty() 判断；
-    2) app/main.py 的 main() 开头兜底：若 sys.stdout/stderr 仍为 None，
-       重定向到 os.devnull，保证任何 print / 日志写入不崩。
-
-【问题9】窗口模式下 print / traceback 无法输出，排错无门
-  原因：无控制台模式下 Python 层 stderr 为 None，且 PyInstaller
-        引导层的错误对话框不经过 Python 层 stderr，异常信息直接丢失。
-  解决：在 run.py（打包入口）最前面统一重定向：
-        - sys.stdout / sys.stderr → %APPDATA%\EduRAGTutor\eduragtutor.log
-          （追加模式、utf-8、行缓冲）
-        - 重定向失败（如目录不可写）则回退到 os.devnull，
-          无论如何保证流不为 None；
-        - 诊断信息另写 startup_debug.txt，不依赖 stdout；
-        - 顶层 try/except 捕获未捕获异常，完整 traceback 落盘后再 raise。
-  效果：打包版任何启动错误都能在用户目录的日志文件中查到，
-        本次排查"混入旧代码"问题正是靠它定位的。
-
-【问题10】资料上传报"文件解析失败"，日志显示 chromadb 相关 ModuleNotFoundError
-  原因：与问题6同源（chromadb 动态导入缺失），另外打包版缺少
-        日志记录，真实异常被吞掉只回传了笼统的 400 提示。
-  解决：1) 按问题6补全 hiddenimports 后消失；
-        2) 在 routes_material.py 的入库流程中增加
-           logger.exception("资料入库失败: ...")，真实异常写入
-           %APPDATA%\EduRAGTutor\eduragtutor.log，便于用户反馈时排查。
-
-【问题11】测试时 SQLite 报：unable to open database file
-  原因：本测试是在受限沙箱中执行的，SQLite 的 app.db-shm /
-        app.db-wal 文件操作被沙箱拦截——属于测试环境限制，
-        不是应用缺陷（真实用户环境无此限制）。
-  解决：验证时用非沙箱方式重新启动 exe 实测，数据库正常初始化。
-        教训：桌面应用涉及 SQLite/文件锁的测试要贴近真实环境。
-
-【问题12】★最重要的坑：修复代码已写好，exe 却仍报 isatty 旧错误
-  现象：run.py / main.py 明明已包含重定向和 use_colors=False 修复，
-        新打的 exe 启动仍崩溃，报错行号（run.py:28 / main.py:96）
-        与当前源码对不上。
-  排查过程：
-    1) 对比报错行号与磁盘源码 → 行号指向的是修复前的旧代码结构；
-    2) 直接启动 dist 里的 exe 实测 → 进程秒退、健康检查 120 秒无响应、
-       startup_debug.txt 未更新（证明 exe 内根本没有重定向代码）；
-    3) 结合构建日志时间线 → 构建耗时较长，PyInstaller 分析阶段
-       读取的是修复前的旧源码，修复代码在构建过程中才落盘。
-  结论：旧构建的 exe 混入了旧代码，源码本身没有问题。
-  解决：用当前已确认完整的源码重新执行
-        PyInstaller EduRAGTutor.spec --noconfirm --clean
-        重新构建后一切正常。
-  教训：
-    - 构建期间不要修改源码，务必等构建完全结束后再动代码；
-    - 打包产物要实测（启动 + 健康检查 + startup_debug 更新时间戳），
-      不要默认"源码改了 = exe 生效"；
-    --clean 参数很重要，避免缓存干扰。
-
-----------------------------------------------------------------
-四、最终验证结果（全部通过）
-----------------------------------------------------------------
-  1. 窗口模式启动：秒级启动，窗口标题"Edu-RAG-Tutor"
-  2. 健康检查：/api/health 约 2 秒返回 200
-  3. 设置持久化：保存→读取生效→还原无损，API Key 全程保持
-  4. 资料入库：文档解析 + 向量化成功（chunks=1，本地向量模型正常）
-  5. LLM 连通性：成功请求 DeepSeek 接口并正确回传鉴权错误信息
-     （测试时保存的是无效 Key，属预期行为）
-  6. 数据目录：自动创建于 %APPDATA%\EduRAGTutor\data\
-     （app.db / chroma / uploads / audio）
-
-----------------------------------------------------------------
-五、产物与使用说明
-----------------------------------------------------------------
-  安装包（分发用）：installer\EduRAGTutor-Setup-1.0.0.exe（231 MB）
-  绿色版（直接运行）：dist\EduRAGTutor\EduRAGTutor.exe
-  一键打包脚本：build.bat（依赖 .venv + PyInstaller + Inno Setup 6）
-  运行日志：%APPDATA%\EduRAGTutor\eduragtutor.log（用户反馈问题时索取）
-
-  分发流程：对方安装后首次启动 → 首启向导输入自己的 API Key →
-  保存后即可使用；之后可随时在设置中更换模型 / 接口地址 / Key。
-
-----------------------------------------------------------------
-六、通用经验总结
-----------------------------------------------------------------
-  1. 无控制台（console=False）打包 = stdout/stderr 为 None：
-     入口处必须先做流重定向，且所有依赖库的日志初始化
-     （isatty 判断、彩色输出）都要显式禁用或兜底。
-  2. 动态导入的库（chromadb / sentence-transformers / pywebview /
-     pyttsx3 / uvicorn）打包时必须 collect_submodules 或手写
-     hiddenimports。
-  3. 打包产物必须"实测"：启动、健康检查、核心功能各走一遍；
-     报错行号与源码对不上时，优先怀疑"产物是旧代码"。
-  4. 日志先行：把"异常落盘"做进产品（eduragtutor.log +
-     startup_debug.txt），用户侧的疑难杂症才有据可查。
-  5. 静态资源带版本参数（?v=N）是前端缓存问题的标准解法。
-
-----------------------------------------------------------------
-七、v1.1 功能迭代阶段（2D互动角色 / 皮肤音色 / 专注模式 /
-    阶段奖励巩固学习）新增问题
-----------------------------------------------------------------
-
-【问题13】重构 _edge_tts 后 TTS 全部降级为 pyttsx3 系统音色
-  现象：试听/朗读返回 audio/wav 而非 mp3，不同音色音频完全相同。
-  排查：synthesize 的 except 静默吞错 → 线程内直接调 _edge_tts
-        拿到真实堆栈：NameError: settings is not defined
-        （重构签名时误删了 settings = get_settings()，
-        但函数体还在用 settings.tts_timeout）。
-  解决：补回变量；教训——重构后"静默降级"链路必须用单测或
-        直接调用暴露真实异常，不能只看"功能能用"（降级假象）。
-
-【问题14】skin.json 带记事本 BOM 时显示名解析失败
-  现象：皮肤名显示为目录名而非 skin.json 里配置的中文名。
-  原因：Windows 记事本保存 UTF-8 默认带 BOM，
-        json.loads 读 utf-8 报错被 except 吞掉，回退目录名。
-  解决：read_text(encoding="utf-8-sig") 兼容带/不带 BOM。
-
-【问题15】★IDE 旧缓冲区自动保存覆盖磁盘代码（反复发生）
-  现象：AI 改完的代码几秒~几分钟后被"回滚"为旧版；
-        多个前端文件 mtime 完全相同（批量回写特征）。
-  原因：用户 IDE 中开着这些文件的旧标签页，自动保存机制
-        周期性把内存中的旧内容写回磁盘。
-  解决：改完后"等待+复查"（sleep 20~30s 再 grep 校验），
-        发现丢失立即补写；并提醒用户关闭旧标签或 Revert File。
-  教训：在该环境下，每次编辑后必须复验；连续多文件修改时
-        分小批做，每批验证。
-
-【问题16】flex 布局中列表滚动失效（学习计划撑破面板）
-  现象：知识点多了以后溢出到面板外，视觉上被下方面板挡住。
-  原因：滚动容器 .point-list 的父级链（#progress-body）
-        没有 min-height:0 / flex 高度约束，flex 子项默认
-        min-height:auto，内容把容器撑高，overflow 不生效。
-  解决：#progress-body { flex:1; min-height:0; display:flex;
-        flex-direction:column } + .panel 加 overflow:hidden 兜底。
-  教训：flex 嵌套滚动布局，从滚动容器到固定高度祖先的整条
-        链路都要 min-height:0，断一层滚动就失效。
-
-【问题17】圆形头像只显示立绘中段（身体），看不到脸
-  原因：.avatar 38×38 + object-fit:cover，竖长立绘被按宽度
-        放大后默认从中间裁剪，头部被裁掉。
-  解决：加 object-position: top center，从顶部裁剪保留头部。
-
-【问题18】测评选择题选项排版错乱：单选圆圈占满整行，选项文字被挤到最右侧
-  现象：答题弹窗里每个选项的圆圈独占一行居中，"A. 2num" 等
-        文字被顶到右边换行，视觉上"左对齐的点占的地方太大"。
-  原因：弹窗通用样式 .modal input { width: 100% }（服务于设置
-        弹窗的文本输入框）把 <input type="radio"> 也撑成了
-        整行宽，flex 布局里圆圈把文字挤到行尾。
-  解决：.quiz-opt input 加 width: auto + flex-shrink: 0
-        覆盖通用规则，让单选框只占自身大小、紧贴选项文字；
-        并升级 CSS 版本号强制刷新缓存。
-  教训：弹窗级 "input 通配 100% 宽" 的样式会误伤 radio/checkbox，
-        新增含控件的弹窗区块时要针对性回收 width。
-
-【问题19】★学前测评出题报"出题失败，请检查大模型配置重试"（503）
-  现象：配置了 API Key 的用户点"开始出题"直接失败；
-        后端日志有 "LLM 返回内容无法解析为 JSON"。
-  原因：用户的模型 deepseek-v4-flash 是推理模型——回复前先思考，
-        reasoning_tokens（实测 2577）计入 max_tokens 上限；
-        出题原设 max_tokens=3500 被思考吃掉大半，10 道题的
-        JSON 正文写到一半被截断（finish_reason=length），
-        整体 json.loads 失败 → 出题抛错返回 503。
-  解决：双保险。① 提高 token 上限：出题 3500→8000、
-        路线规划 2000→4000，给思考留余量；
-        ② 新增"截断救捞"：llm.py 增加 chat_json_with_raw
-        （解析失败时把原文带回），assessment.py 的
-        _salvage_objects 按 '{"question"' / '{"method"' 标记
-        定位每个对象起点，用 json.JSONDecoder.raw_decode
-        逐个抠出完整的题目/阶段对象——就算 JSON 尾巴断了，
-        完整的前几题照样凑成试卷（下限 6 题）。
-  教训：推理模型的 max_tokens 必须给足思考余量；要求 LLM 输出
-        长 JSON 时不能只依赖整体解析，必须配截断救捞兜底。
-
-================================================================
-（完）
+────────────────────────────────────────────────────────────────
+【遗留问题（暂未修复，不影响学习功能）】
+────────────────────────────────────────────────────────────────
+1. 窄窗口（<600px）布局挤压时，右侧栏面板会遮挡顶部按钮
+   （📒🎯⚙️🕘），点击无效；拉宽窗口即可。
+2. "关窗口 = 服务退出"的设计对开发模式不友好，可考虑
+   服务与窗口分离或退出前二次确认。
+════════════════════════════════════════════════════════════════

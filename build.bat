@@ -3,7 +3,7 @@ chcp 65001 >nul
 REM ============================================================
 REM  Edu-RAG-Tutor 学习助手 - 一键打包脚本
 REM  产物1: dist\EduRAGTutor\EduRAGTutor.exe            (绿色版，可直接运行)
-REM  产物2: installer\EduRAGTutor-Setup-1.2.0.exe (安装包，分发用)
+REM  产物2: installer\EduRAGTutor-Setup-1.2.1.exe (安装包，分发用)
 REM  依赖:   .venv (已装 requirements.txt + pyinstaller) / Inno Setup 6
 REM ============================================================
 setlocal enabledelayedexpansion
@@ -46,7 +46,7 @@ if errorlevel 1 (
 echo.
 echo ============================================================
 echo  打包完成！
-echo    安装包: installer\EduRAGTutor-Setup-1.2.0.exe
+echo    安装包: installer\EduRAGTutor-Setup-1.2.1.exe
 echo    绿色版: dist\EduRAGTutor\EduRAGTutor.exe
 echo ============================================================
 pause

@@ -273,6 +273,9 @@ def make_plan(sid: int, topic: str, spec: Optional[MethodSpec] = None) -> list[d
             {"role": "user", "content": user_content},
         ],
         temperature=0.3,
+        # 推理模型的思考 token 计入 max_tokens（与测评出题同坑）：
+        # 默认 2048 可能被思考吃掉导致计划 JSON 截断 → 静默降级单点
+        max_tokens=4000,
     )
 
     points: list[dict] = []
@@ -325,6 +328,9 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
         # ---- 规划阶段：拆解知识点并生成开场白 ----
         if status == "planning" and not db.list_points(sid):
             topic = user_text.strip()[:80] or "综合学习"
+            # 规划是非流式 JSON 调用，推理模型可能耗时 1-3 分钟，
+            # 先推送状态文案让用户立刻看到"正在做什么"而不是干等
+            yield {"type": "status", "text": "正在拆解知识点、制定学习计划…"}
             make_plan(sid, topic, spec)
             db.update_session(sid, topic=topic, status="learning")
             session = db.get_session(sid)
@@ -357,6 +363,8 @@ def handle_chat(sid: int, user_text: str) -> Generator[dict, None, None]:
             # 计划已生成，先推送一次状态（右栏立即显示知识点清单）
             yield _state_event(sid, status)
             current = db.get_current_point(sid)
+            # 开场引导同样要等推理模型出首个 token，更新等待文案
+            yield {"type": "status", "text": "学习计划已就绪，正在准备开场引导…"}
 
         # 历史以文本形式嵌入 system：库中 assistant 历史已剥离评估块，
         # 若作为 role 消息回喂，模型会模仿历史而省略评估块，导致评估失效。

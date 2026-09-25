@@ -8,6 +8,8 @@ import json
 import logging
 from typing import Iterator, Optional
 
+import httpx
+
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -15,8 +17,27 @@ logger = logging.getLogger(__name__)
 # 懒加载的客户端单例
 _client = None
 
+# 流式相邻 chunk 的最大等待秒数：所有调用统一走流式，读超时只约束
+# chunk 间隔——生成期间 chunk 持续到达则长任务不受影响；而连接卡死/
+# 网关挂起能在该时间内报错返回，而不是挂满 SDK 默认 600 秒再重试。
+# 正常 chunk 间隔远小于 1 秒。
+_STREAM_IDLE_TIMEOUT = 90.0
+
 # prefs 表中的键名（与 Settings 字段同名加 llm_ 前缀）
 _PREF_KEYS = ("llm_api_key", "llm_base_url", "llm_model")
+
+
+def thinking_enabled() -> bool:
+    """深度思考开关：prefs 覆盖 .env 默认（见 Settings.llm_thinking）。"""
+    from app.db import models as db
+
+    try:
+        v = db.get_pref("llm_thinking")
+    except Exception:  # 数据库不可用时退回默认值，不阻塞
+        v = None
+    if v is None or v == "":
+        return get_settings().llm_thinking
+    return str(v).strip().lower() in ("1", "true")
 
 
 def effective_llm_config(overrides: Optional[dict] = None) -> dict:
@@ -63,7 +84,12 @@ def _get_client():
         from openai import OpenAI  # 延迟导入，避免启动开销
 
         cfg = effective_llm_config()
-        _client = OpenAI(api_key=cfg["api_key"], base_url=_norm_base_url(cfg["base_url"]))
+        _client = OpenAI(
+            api_key=cfg["api_key"],
+            base_url=_norm_base_url(cfg["base_url"]),
+            timeout=httpx.Timeout(_STREAM_IDLE_TIMEOUT, connect=15.0),
+            max_retries=1,  # SDK 默认重试 2 次，网络抖动会让等待时间翻三倍
+        )
     return _client
 
 
@@ -89,11 +115,16 @@ def test_connection(cfg: dict) -> str:
 def _defaults(temperature, max_tokens) -> dict:
     """组装公共请求参数：模型名 + 未显式指定时的默认采样参数。"""
     cfg = effective_llm_config()
-    return {
+    d = {
         "model": cfg["model"],
         "temperature": get_settings().llm_temperature if temperature is None else temperature,
         "max_tokens": get_settings().llm_max_tokens if max_tokens is None else max_tokens,
     }
+    if not thinking_enabled():
+        # 关闭深度思考：推理模型跳过思维链，回复显著提速；
+        # 非思考模型（deepseek-chat 等）实测会忽略该参数
+        d["extra_body"] = {"reasoning_effort": "none"}
+    return d
 
 
 def chat_stream(messages, temperature=None, max_tokens=None) -> Iterator[str]:
@@ -111,13 +142,29 @@ def chat_stream(messages, temperature=None, max_tokens=None) -> Iterator[str]:
             yield delta
 
 
+def _stream_text(messages, temperature=None, max_tokens=None, response_format=None) -> str:
+    """流式请求并聚合为完整文本（非流式调用的统一底层通道）。
+
+    chat_once / chat_json 也走流式聚合：生成期间 chunk 持续到达，
+    读超时只约束 chunk 间隔——长生成（如 8000 token 出题）不受影响，
+    而连接卡死能在 90 秒内被发现并报错，避免"无响应干等几分钟"。
+    """
+    kwargs = dict(messages=messages, stream=True, **_defaults(temperature, max_tokens))
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    parts: list[str] = []
+    for chunk in _get_client().chat.completions.create(**kwargs):
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta.content
+        if delta:
+            parts.append(delta)
+    return "".join(parts)
+
+
 def chat_once(messages, temperature=None, max_tokens=None) -> str:
     """非流式对话，返回完整回复文本。"""
-    resp = _get_client().chat.completions.create(
-        messages=messages,
-        **_defaults(temperature, max_tokens),
-    )
-    return resp.choices[0].message.content or ""
+    return _stream_text(messages, temperature, max_tokens)
 
 
 def _strip_fences(text: str) -> str:
@@ -138,12 +185,9 @@ def chat_json_with_raw(messages, temperature=None, max_tokens=None) -> tuple[Opt
     解析失败时剥掉围栏重试；仍失败返回 (None, 原文)——调用方可对原文做
     截断救捞（如推理模型 max_tokens 不足导致 JSON 写到一半被截断）。
     """
-    resp = _get_client().chat.completions.create(
-        messages=messages,
-        response_format={"type": "json_object"},
-        **_defaults(temperature, max_tokens),
+    content = _stream_text(
+        messages, temperature, max_tokens, response_format={"type": "json_object"}
     )
-    content = resp.choices[0].message.content or ""
     try:
         return json.loads(content), content
     except json.JSONDecodeError:

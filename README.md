@@ -66,7 +66,7 @@
 
 ### 方式一：下载安装包（推荐）
 
-1. **下载安装包**：[EduRAGTutor-Setup-1.2.0.exe](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/download/v1.2.0/EduRAGTutor-Setup-1.2.0.exe)（约 350 MB）
+1. **下载安装包**：[EduRAGTutor-Setup-1.2.1.exe](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/download/v1.2.1/EduRAGTutor-Setup-1.2.1.exe)（约 350 MB）
    也可前往 [Releases 页面](https://github.com/qinjin1021/Edu-RAG-Tutor/releases/latest) 查看全部版本
 2. **安装**：双击运行，按向导下一步即可（无需管理员权限）
 3. **配置**：首次启动会弹出向导，输入你自己的大模型 API Key（推荐 [DeepSeek](https://platform.deepseek.com)：注册后在「API Keys」创建；也支持通义千问 / Kimi / 智谱 / 本地 Ollama 等 OpenAI 兼容服务）

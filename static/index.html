@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Edu-RAG-Tutor</title>
-  <link rel="stylesheet" href="css/style.css?v=14" />
+  <link rel="stylesheet" href="css/style.css?v=15" />
 </head>
 <body>
 <div id="app">
@@ -115,6 +115,13 @@
     <div class="form-row">
       <label for="set-model">模型名称</label>
       <input type="text" id="set-model" placeholder="deepseek-chat" autocomplete="off" />
+    </div>
+
+    <div class="form-row">
+      <label class="check-row" for="set-thinking">
+        <input type="checkbox" id="set-thinking" />
+        <span>🧠 深度思考模式（更深入但回复更慢，推荐关闭）</span>
+      </label>
     </div>
 
     <div id="test-result" class="test-result hidden"></div>
@@ -231,6 +238,6 @@
   </div>
 </div>
 
-<script src="js/app.js?v=14"></script>
+<script src="js/app.js?v=17"></script>
 </body>
 </html>

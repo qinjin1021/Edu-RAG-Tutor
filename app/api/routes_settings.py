@@ -20,6 +20,7 @@ class SettingsBody(BaseModel):
     model: str = ""
     clear_api_key: bool = False  # True = 清除已保存的 Key（回到未配置状态）
     voice: str = ""  # edge-tts 音色 ID；留空 = 保持不变
+    thinking: bool | None = None  # 深度思考开关；None = 保持不变
 
 
 def _mask(key: str) -> str:
@@ -42,6 +43,7 @@ def get_settings_route():
         "model": cfg["model"],
         "voices": speaker.VOICES,
         "voice": speaker.effective_voice(),
+        "thinking": llm.thinking_enabled(),
     }
 
 
@@ -55,6 +57,9 @@ def put_settings(body: SettingsBody):
         db.set_pref("llm_api_key", body.api_key.strip())
     db.set_pref("llm_base_url", body.base_url.strip())
     db.set_pref("llm_model", body.model.strip())
+    # 深度思考开关：显式传入才更新
+    if body.thinking is not None:
+        db.set_pref("llm_thinking", "1" if body.thinking else "0")
     # 音色：留空 = 保持不变；填了但无效则忽略
     if body.voice.strip() and any(v["id"] == body.voice.strip() for v in speaker.VOICES):
         db.set_pref("tts_voice", body.voice.strip())

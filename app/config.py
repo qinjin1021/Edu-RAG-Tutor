@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_temperature: float = 0.5
     llm_max_tokens: int = 2048
+    # 深度思考（推理模型思维链）：默认关闭——教学对话每轮先思考几十秒，
+    # 高峰期被拉长到分钟级；关闭后请求带 reasoning_effort=none 提速。
+    # 非思考模型会忽略该参数，无副作用。
+    llm_thinking: bool = False
 
     # ---------- Embedding / 检索 ----------
     embedding_model: str = "BAAI/bge-small-zh-v1.5"

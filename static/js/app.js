@@ -37,6 +37,7 @@ const els = {
   setApiKey: $('set-api-key'),
   setBaseUrl: $('set-base-url'),
   setModel: $('set-model'),
+  setThinking: $('set-thinking'),
   keyStatus: $('key-status'),
   toggleKeyBtn: $('toggle-key-btn'),
   testConnBtn: $('test-conn-btn'),
@@ -1281,6 +1282,7 @@ function openSettings(wizard) {
   fetch('/api/settings').then((r) => r.json()).then((data) => {
     els.setBaseUrl.value = data.base_url || '';
     els.setModel.value = data.model || '';
+    els.setThinking.checked = !!data.thinking; // 深度思考开关（默认关=快速）
     els.keyStatus.textContent = data.configured ? `已配置 ${data.api_key_masked}` : '未配置';
     els.clearKeyBtn.classList.toggle('hidden', !data.configured);
   }).catch(() => {});
@@ -1375,6 +1377,7 @@ async function saveSettings() {
     api_key: els.setApiKey.value.trim(),
     base_url: els.setBaseUrl.value.trim(),
     model: els.setModel.value.trim(),
+    thinking: els.setThinking.checked,
   };
   if (settingsWizard && !body.api_key && !state.llmReady) {
     showTestResult(false, '❌ 请先填写 API Key');
@@ -1509,19 +1512,25 @@ function showThinking() {
   wrap.className = 'msg assistant';
   wrap.innerHTML = `
     <img class="avatar" src="${charAsset('think')}" alt="${charName()}">
-    <div class="bubble thinking-bubble"><span class="dots"><i></i><i></i><i></i></span>${charName()}思考中…</div>`;
+    <div class="bubble thinking-bubble"><span class="dots"><i></i><i></i><i></i></span><span class="thinking-text">${charName()}思考中…</span></div>`;
   els.messageList.appendChild(wrap);
   thinkingEl = wrap;
   scrollToBottom();
 }
 function removeThinking() { if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; } }
 
+/* 等待文案更新（后端 status 事件：制定计划/准备开场等阶段提示） */
+function setThinkingText(text) {
+  if (!thinkingEl) return;
+  const el = thinkingEl.querySelector('.thinking-text');
+  if (el && text) el.textContent = text;
+}
+
 /* 流式期间禁用输入 */
 function setStreamingUI(on) {
   state.streaming = on;
   els.chatInput.disabled = on;
   els.sendBtn.disabled = on;
-  els.uploadBtn.disabled = on;
   els.chatInput.placeholder = on
     ? `${charName()}思考中…`
     : `和${charName()}聊聊你想学什么…（Enter 发送，Shift+Enter 换行）`;
@@ -1798,6 +1807,9 @@ async function streamChat(content) {
         streamNode.txt.textContent = fullText; // pre-wrap 支持换行
         scrollToBottom();
         break;
+      case 'status':
+        setThinkingText(obj.text); // 阶段性等待提示（规划/开场等）
+        break;
       case 'emotion':
         setEmotion(obj.emotion); // 即时切换立绘
         break;
@@ -1871,7 +1883,9 @@ async function streamChat(content) {
       refreshSessionMeta();
     }
   } catch (e) {
-    toast('消息发送失败，请检查网络或后端服务', 'error');
+    const msg = (e && e.message) ? e.message : String(e);
+    toast(`消息发送失败：${msg}`, 'error');
+    addSystemCard(`⚠️ 消息发送失败：${msg}（请把这条截图给开发者）`);
     finish('idle');
   }
 }

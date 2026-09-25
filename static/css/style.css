@@ -659,6 +659,20 @@ body {
   margin-top: 3px;
   accent-color: var(--pink-deep);
 }
+/* 设置弹窗：深度思考开关行（同样覆盖 input 通配 100% 宽） */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 0;
+  font-weight: 500;
+  cursor: pointer;
+}
+.check-row input {
+  width: auto;
+  flex-shrink: 0;
+  accent-color: var(--pink-deep);
+}
 /* 结果区 */
 .assess-head { font-size: 15px; font-weight: 700; color: var(--ink); margin: 6px 0; }
 .assess-summary { font-size: 13px; color: var(--ink-light); line-height: 1.7; margin: 6px 0 12px; }
